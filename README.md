@@ -4,7 +4,7 @@
 
 An interactive geospatial dashboard that maps regional business metrics onto a heat distribution, with multi-metric switching and linked drill-down.
 
-**在线预览 / Live Demo** — https://yil688.github.io/regional-heatmap/
+**在线预览 / Live Demo** — [https://yil688.github.io/regional-heatmap/](https://github.com/yil688/geo-heatmap-dashboard/blob/main/regional-heatmap)
 
 ---
 
