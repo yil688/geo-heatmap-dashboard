@@ -4,7 +4,7 @@
 
 An interactive geospatial dashboard that maps regional business metrics onto a heat distribution, with multi-metric switching and linked drill-down.
 
-**在线预览 / Live Demo** — [https://yil688.github.io/regional-heatmap/](https://github.com/yil688/geo-heatmap-dashboard/blob/main/regional-heatmap)
+**在线预览 / Live Demo** — https://yil688.github.io/geo-heatmap-dashboard/
 
 ---
 
@@ -54,7 +54,3 @@ Click a ranking row to fly to its marker and open the detail card; level filters
 米白纸面 × 墨色 × 朱砂的报刊式版式：衬线标题、等宽数字、全局纸面噪点与印章元素，弱化仪表盘的工业感。
 
 A newsprint-inspired layout in off-white, ink black and cinnabar: serif headings, tabular figures, global paper grain and seal motifs, deliberately avoiding the industrial feel of a typical dashboard.
-
-## 📄 License
-
-MIT
