@@ -1,0 +1,1407 @@
+<!DOCTYPE html>
+<!--
+  区域经营热力图谱 · 作品展示版
+  说明：本页面用于个人技术作品展示。GMV、毛利值、毛利率、单客价值、成交票量
+       五个字段全部经过脱敏处理，逐条独立扰动并整体缩放；
+       单条每字段相对原值失真均超过 15%，顶部汇总口径
+       （总营业额 / 总毛利 / 平均毛利率）与聚合客单价同样超过 15%，
+       已校验派生指标与聚合指标均不存在方向抵消。
+       页面仅保留数据结构与可视化逻辑，不代表任何企业的真实经营结果；
+       区域标识使用匿名代号。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>四川景区 · 区域经营热力图谱（示意数据）</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,700&family=Noto+Serif+SC:wght@400;500;700;900&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   设计代币 —— 米白纸面 / 墨色 / 朱砂
+   ============================================================ */
+:root {
+  --paper-0: #f5efe2;
+  --paper-1: #faf6ec;
+  --paper-2: #fffbf2;
+  --paper-3: #ffffff;
+
+  --ink-0:   #1a1612;
+  --ink-1:   #3a342c;
+  --ink-2:   #6b6155;
+  --ink-3:   #a59a8a;
+
+  --line:    rgba(26,22,18,0.08);
+  --line-2:  rgba(26,22,18,0.16);
+
+  --cinnabar:    #c5462e;
+  --cinnabar-d:  #9e3622;
+  --cinnabar-soft: rgba(197,70,46,0.08);
+
+  --amber:   #d9a14f;
+  --jade:    #5e8f6b;
+  --indigo:  #3a5d7e;
+
+  /* 两个区域身份色 —— 与朱砂主色相配 */
+  --mgr-a:  #3a5d7e;   /* 区域 A · 靛蓝 */
+  --mgr-b:  #9e3622;   /* 区域 B · 深朱 */
+
+  --shadow-1: 0 1px 3px rgba(60,40,20,0.06), 0 8px 24px -8px rgba(60,40,20,0.12);
+  --shadow-2: 0 4px 12px rgba(60,40,20,0.08), 0 24px 48px -12px rgba(60,40,20,0.18);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; background: var(--paper-0); color: var(--ink-0); }
+body {
+  font-family: "Noto Sans SC", "Noto Serif SC", -apple-system, sans-serif;
+  font-size: 15.5px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 全局纸面噪点 */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5  0 0 0 0 0.4  0 0 0 0 0.2  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  mix-blend-mode: multiply; opacity: 0.5;
+}
+
+/* ============================================================
+   顶部 · 报刊式标题栏
+   ============================================================ */
+.masthead {
+  position: relative; z-index: 100;
+  height: 104px; padding: 0 40px;
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 36px;
+  background: var(--paper-1);
+  border-bottom: 2px solid var(--ink-0);
+}
+.masthead::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -7px; height: 1px;
+  background: var(--ink-0);
+}
+
+.brand { display: flex; align-items: center; gap: 18px; }
+.brand .seal {
+  width: 58px; height: 58px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--cinnabar); color: var(--paper-2);
+  font-family: "Noto Serif SC", serif; font-weight: 900; font-size: 25px;
+  letter-spacing: -0.05em; border-radius: 4px;
+  box-shadow: 0 2px 0 var(--cinnabar-d), inset 0 0 0 2px rgba(255,255,255,0.15);
+  position: relative;
+}
+.brand .seal::before {
+  content: "印"; position: absolute; top: 3px; right: 5px; font-size: 10px; opacity: 0.5;
+}
+.brand .name {
+  font-family: "Noto Serif SC", serif; font-weight: 900; font-size: 27px;
+  letter-spacing: 0.04em; color: var(--ink-0); line-height: 1.1;
+}
+.brand .name .bullet { color: var(--cinnabar); font-weight: 400; margin: 0 6px; }
+.brand .sub {
+  font-size: 13px; color: var(--ink-2); margin-top: 5px;
+  letter-spacing: 0.12em; transition: color .3s;
+}
+
+/* 顶部 KPI 条 */
+.ribbon { display: flex; gap: 36px; justify-content: center; align-items: center; }
+.ribbon .kpi { text-align: left; position: relative; padding-left: 16px; }
+.ribbon .kpi::before {
+  content: ""; position: absolute; left: 0; top: 4px; bottom: 4px; width: 2px;
+  background: var(--cinnabar);
+}
+.ribbon .kpi .lbl {
+  font-family: "Noto Serif SC", serif; font-weight: 500; font-size: 13.5px;
+  color: var(--ink-2); margin-bottom: 5px; letter-spacing: 0.1em;
+}
+.ribbon .kpi .val {
+  font-family: "Fraunces", "Noto Serif SC", serif; font-weight: 700; font-size: 26px;
+  color: var(--ink-0); letter-spacing: -0.01em; line-height: 1;
+  font-variation-settings: "opsz" 144;
+  transition: color .25s;
+}
+.ribbon .kpi .val .unit {
+  font-family: "Noto Sans SC", sans-serif; font-size: 13.5px; color: var(--ink-2);
+  margin-left: 4px; font-weight: 400;
+}
+
+.meta { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.demo-badge {
+  display: inline-block; padding: 3px 9px; margin-right: 9px;
+  font-family: "Noto Serif SC", serif; font-weight: 700; font-size: 11px;
+  color: var(--paper-2); background: var(--cinnabar); border-radius: 3px;
+  letter-spacing: 0.14em; vertical-align: 1px;
+}
+.meta .period {
+  font-family: "Fraunces", serif; font-weight: 500; font-size: 14.5px;
+  color: var(--ink-1); letter-spacing: 0.05em;
+}
+
+/* 区域切换 —— 印章式 tab */
+.mgr-tabs { display: flex; gap: 8px; }
+.mgr-tab {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px 6px 8px; cursor: pointer; user-select: none;
+  background: var(--paper-2); border: 1px solid var(--line-2); border-radius: 6px;
+  transition: all .2s ease;
+  position: relative;
+}
+.mgr-tab .mini-seal {
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  font-family: "Noto Serif SC", serif; font-weight: 900; font-size: 15px;
+  color: var(--paper-2); border-radius: 3px;
+  letter-spacing: -0.05em;
+}
+.mgr-tab[data-mgr="all"]  .mini-seal { background: var(--ink-0); }
+.mgr-tab[data-mgr="a"] .mini-seal { background: var(--mgr-a); }
+.mgr-tab[data-mgr="b"]   .mini-seal { background: var(--mgr-b); }
+.mgr-tab .txt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+}
+.mgr-tab .txt .n {
+  font-family: "Noto Serif SC", serif; font-weight: 700; font-size: 13.5px;
+  color: var(--ink-0); letter-spacing: 0.05em; line-height: 1.15;
+}
+.mgr-tab .txt .r {
+  font-family: "Fraunces", serif; font-size: 11.5px; color: var(--ink-2);
+  letter-spacing: 0.02em; line-height: 1.1;
+}
+.mgr-tab:hover:not(.active) { border-color: var(--ink-1); background: var(--paper-3); }
+.mgr-tab.active {
+  border-color: var(--ink-0);
+  box-shadow: 0 2px 0 var(--cinnabar), inset 0 0 0 1px var(--ink-0);
+  background: var(--paper-3);
+}
+.mgr-tab.active .txt .n { color: var(--ink-0); }
+
+/* ============================================================
+   主体布局
+   ============================================================ */
+.stage { display: grid; grid-template-columns: 1fr 440px; height: calc(100% - 104px); }
+
+/* ============================================================
+   地图区
+   ============================================================ */
+.canvas { position: relative; background: var(--paper-1); overflow: hidden; }
+#map { position: absolute; inset: 0; background: var(--paper-1); }
+
+.leaflet-tile-pane {
+  filter: grayscale(85%) sepia(18%) saturate(0.85) brightness(1.04) contrast(0.92);
+}
+
+.leaflet-control-zoom { border: none !important; box-shadow: var(--shadow-1) !important; margin: 20px !important; border-radius: 8px; overflow: hidden; }
+.leaflet-control-zoom a {
+  background: var(--paper-2) !important; color: var(--ink-0) !important;
+  border: 1px solid var(--line-2) !important;
+  width: 36px !important; height: 36px !important; line-height: 34px !important;
+  font-family: "Fraunces", serif !important; font-size: 18px !important;
+}
+.leaflet-control-zoom a:hover { background: var(--cinnabar) !important; color: #fff !important; }
+
+/* 角标十字 */
+.crosshair { position: absolute; pointer-events: none; z-index: 400; width: 32px; height: 32px; }
+.crosshair::before, .crosshair::after { content: ""; position: absolute; background: var(--ink-0); opacity: 0.35; }
+.crosshair.tl { top: 24px; left: 24px; }
+.crosshair.tr { top: 24px; right: 24px; }
+.crosshair.bl { bottom: 24px; left: 24px; }
+.crosshair.br { bottom: 24px; right: 24px; }
+.crosshair::before { width: 1px; height: 18px; }
+.crosshair::after  { height: 1px; width: 18px; }
+.crosshair.tl::before { left: 0; top: 0 } .crosshair.tl::after { top: 0; left: 0 }
+.crosshair.tr::before { right: 0; top: 0 } .crosshair.tr::after { top: 0; right: 0 }
+.crosshair.bl::before { left: 0; bottom: 0 } .crosshair.bl::after { bottom: 0; left: 0 }
+.crosshair.br::before { right: 0; bottom: 0 } .crosshair.br::after { bottom: 0; right: 0 }
+
+/* 地图大字 · 地名牌 */
+.geo-tag { position: absolute; top: 60px; left: 60px; z-index: 500; pointer-events: none; }
+.geo-tag .badge {
+  display: inline-block;
+  font-family: "Noto Serif SC", serif; font-size: 14px; font-weight: 500;
+  color: var(--cinnabar); letter-spacing: 0.3em; margin-bottom: 14px;
+  padding: 5px 14px; border: 1px solid var(--cinnabar); border-radius: 2px;
+  background: rgba(250,246,236,0.6); backdrop-filter: blur(6px);
+}
+.geo-tag .name {
+  font-family: "Noto Serif SC", serif; font-size: 84px; font-weight: 900;
+  color: var(--ink-0); letter-spacing: 0.05em; line-height: 1;
+  text-shadow: 0 2px 30px rgba(255,251,242,0.8);
+}
+.geo-tag .rule {
+  width: 88px; height: 3px; background: var(--cinnabar); margin-top: 18px;
+  transition: background .3s;
+}
+.geo-tag .coord {
+  font-family: "Fraunces", serif; font-size: 14.5px; color: var(--ink-2);
+  margin-top: 14px; letter-spacing: 0.08em; font-style: italic;
+  transition: color .3s;
+}
+.geo-tag .mgr-line {
+  font-family: "Noto Serif SC", serif; font-size: 13.5px; margin-top: 8px;
+  color: var(--ink-2); letter-spacing: 0.12em;
+}
+.geo-tag .mgr-line .who {
+  font-weight: 700; color: var(--ink-0); margin-left: 6px;
+}
+.geo-tag .mgr-line .who[data-m="a"] { color: var(--mgr-a); }
+.geo-tag .mgr-line .who[data-m="b"]   { color: var(--mgr-b); }
+
+/* ============================================================
+   图例 · 浮卡（左下）
+   ============================================================ */
+.legend {
+  position: absolute; left: 36px; bottom: 36px; z-index: 500;
+  background: var(--paper-2);
+  border: 1px solid var(--line-2); border-radius: 12px;
+  padding: 24px 28px; min-width: 380px; box-shadow: var(--shadow-2);
+}
+.legend .ttl {
+  font-family: "Noto Serif SC", serif; font-weight: 700; font-size: 18px;
+  color: var(--ink-0); margin-bottom: 6px; letter-spacing: 0.02em;
+}
+.legend .ttl em { font-style: normal; color: var(--cinnabar); }
+.legend .desc {
+  font-size: 13px; color: var(--ink-2); margin-bottom: 18px; line-height: 1.55;
+}
+.legend .scale {
+  height: 14px; border-radius: 3px;
+  background: linear-gradient(90deg,
+    rgb(82,96,180)   0%,
+    rgb(95,161,215)  20%,
+    rgb(122,199,145) 40%,
+    rgb(230,220,90)  60%,
+    rgb(235,140,55)  80%,
+    rgb(220,55,55)   100%
+  );
+  border: 1px solid var(--line-2);
+  position: relative;
+}
+.legend .ticks {
+  display: flex; justify-content: space-between; margin-top: 10px;
+  font-family: "Fraunces", serif; font-size: 14px; color: var(--ink-1); font-weight: 500;
+}
+.legend .ticks .lbl-row {
+  display: flex; justify-content: space-between; margin-top: 2px;
+  font-family: "Noto Sans SC", sans-serif; font-size: 12px; color: var(--ink-2);
+}
+
+/* ============================================================
+   景点标记 —— v4:全部墨色，仅四大景区朱砂高亮
+   ============================================================ */
+.attr-marker {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--ink-0);
+  box-shadow:
+    0 0 0 2px var(--paper-1),
+    0 0 0 3px var(--ink-0),
+    0 2px 4px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: transform 0.18s ease;
+  position: relative;
+}
+/* v4 · 四大景区朱砂高亮 */
+.attr-marker.hl {
+  width: 16px; height: 16px;
+  background: var(--cinnabar);
+  box-shadow:
+    0 0 0 2px var(--paper-1),
+    0 0 0 3px var(--cinnabar-d),
+    0 0 12px 2px rgba(197,70,46,0.55),
+    0 2px 6px rgba(0, 0, 0, 0.25);
+  animation: hl-pulse 2.4s ease-in-out infinite;
+}
+@keyframes hl-pulse {
+  0%, 100% { box-shadow:
+    0 0 0 2px var(--paper-1),
+    0 0 0 3px var(--cinnabar-d),
+    0 0 12px 2px rgba(197,70,46,0.55),
+    0 2px 6px rgba(0, 0, 0, 0.25); }
+  50% { box-shadow:
+    0 0 0 2px var(--paper-1),
+    0 0 0 3px var(--cinnabar-d),
+    0 0 18px 4px rgba(197,70,46,0.75),
+    0 2px 6px rgba(0, 0, 0, 0.25); }
+}
+.attr-marker::after {
+  content: ""; position: absolute; inset: -10px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(26,22,18,0.18) 0%, transparent 70%);
+  opacity: 0; transition: opacity 0.2s;
+}
+.attr-marker:hover {
+  transform: scale(1.55);
+  box-shadow:
+    0 0 0 2px var(--paper-1),
+    0 0 0 3px var(--cinnabar),
+    0 4px 12px rgba(197,70,46,0.4);
+}
+.attr-marker.hl:hover {
+  transform: scale(1.5);
+  animation: none;
+  box-shadow:
+    0 0 0 2px var(--paper-1),
+    0 0 0 3px var(--cinnabar-d),
+    0 0 20px 6px rgba(197,70,46,0.85),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.attr-marker:hover::after { opacity: 1; }
+/* 区域识别外环 */
+.attr-marker.m-a { box-shadow:
+    0 0 0 2px var(--paper-1),
+    0 0 0 3px var(--mgr-a),
+    0 2px 4px rgba(0, 0, 0, 0.2); }
+.attr-marker.m-b { box-shadow:
+    0 0 0 2px var(--paper-1),
+    0 0 0 3px var(--mgr-b),
+    0 2px 4px rgba(0, 0, 0, 0.2); }
+.attr-marker.m-a:hover, .attr-marker.m-b:hover {
+  box-shadow:
+    0 0 0 2px var(--paper-1),
+    0 0 0 3px var(--cinnabar),
+    0 4px 12px rgba(197,70,46,0.4);
+}
+
+.leaflet-marker-icon.leaflet-interactive .attr-marker { transition: transform 0.18s ease, box-shadow 0.18s ease; }
+
+/* ============================================================
+   弹窗 · 卡片样式
+   ============================================================ */
+.leaflet-popup-content-wrapper {
+  background: var(--paper-2) !important; color: var(--ink-0) !important;
+  border: 1px solid var(--line-2); border-radius: 12px !important;
+  box-shadow: var(--shadow-2) !important; padding: 0 !important;
+}
+.leaflet-popup-content { margin: 0 !important; padding: 24px 26px !important; min-width: 340px; line-height: 1.6; }
+.leaflet-popup-tip { background: var(--paper-2) !important; border-color: var(--line-2) !important; }
+.leaflet-popup-close-button {
+  color: var(--ink-2) !important; padding: 10px 10px 0 0 !important;
+  font-size: 20px !important;
+}
+.leaflet-popup-close-button:hover { color: var(--cinnabar) !important; }
+
+.popup .tag-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+}
+.popup .tag {
+  display: inline-block; padding: 4px 12px;
+  font-family: "Noto Serif SC", serif; font-weight: 500; font-size: 12px;
+  color: var(--cinnabar); background: var(--cinnabar-soft);
+  border: 1px solid var(--cinnabar); border-radius: 100px;
+  letter-spacing: 0.1em;
+}
+.popup .mgr-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: "Noto Serif SC", serif; font-weight: 500; font-size: 12px;
+  padding: 4px 10px 4px 7px; border-radius: 100px; letter-spacing: 0.05em;
+}
+.popup .mgr-chip::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+}
+.popup .mgr-chip.m-a { color: var(--mgr-a); background: rgba(58,93,126,0.08); border: 1px solid rgba(58,93,126,0.35); }
+.popup .mgr-chip.m-a::before { background: var(--mgr-a); }
+.popup .mgr-chip.m-b   { color: var(--mgr-b); background: rgba(158,54,34,0.08); border: 1px solid rgba(158,54,34,0.35); }
+.popup .mgr-chip.m-b::before   { background: var(--mgr-b); }
+
+.popup .ttl {
+  font-family: "Noto Serif SC", serif; font-weight: 900; font-size: 24px;
+  color: var(--ink-0); letter-spacing: 0.01em; line-height: 1.2; margin-bottom: 8px;
+}
+.popup .region {
+  font-size: 13px; color: var(--ink-2); margin-bottom: 18px;
+  display: flex; align-items: center; gap: 6px;
+}
+.popup .region::before {
+  content: "◆"; color: var(--cinnabar); font-size: 9px;
+}
+.popup .grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px;
+  padding-top: 16px; border-top: 1px dashed var(--line-2);
+}
+.popup .grid .cell .lbl {
+  font-family: "Noto Serif SC", serif; font-weight: 500; font-size: 13px;
+  color: var(--ink-2); margin-bottom: 5px; letter-spacing: 0.05em;
+}
+.popup .grid .cell .val {
+  font-family: "Fraunces", "Noto Serif SC", serif; font-weight: 700; font-size: 20px;
+  color: var(--ink-0); letter-spacing: -0.01em;
+}
+.popup .grid .cell .val.accent { color: var(--cinnabar); }
+.popup .grid .cell .val.full {
+  font-size: 14px; font-family: "Fraunces", serif; font-weight: 500;
+  color: var(--ink-1); letter-spacing: 0.02em;
+}
+
+/* ============================================================
+   右侧面板
+   ============================================================ */
+.panel {
+  background: var(--paper-1); border-left: 1px solid var(--line-2);
+  overflow-y: auto; padding: 30px 34px 52px;
+  display: flex; flex-direction: column; gap: 30px;
+}
+.panel::-webkit-scrollbar { width: 8px; }
+.panel::-webkit-scrollbar-thumb { background: var(--ink-3); border-radius: 4px; }
+
+.section .h {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 18px; padding-bottom: 14px;
+  border-bottom: 1px solid var(--ink-0);
+  position: relative;
+}
+.section .h::after {
+  content: ""; position: absolute; bottom: -3px; left: 0; right: 0; height: 1px;
+  background: var(--ink-0);
+}
+.section .h .title {
+  font-family: "Noto Serif SC", serif; font-weight: 900; font-size: 19px;
+  color: var(--ink-0); letter-spacing: 0.05em;
+}
+.section .h .title .dot { color: var(--cinnabar); margin: 0 6px; font-weight: 400; }
+.section .h .badge {
+  font-family: "Fraunces", serif; font-style: italic; font-size: 13px;
+  color: var(--ink-2); font-weight: 500;
+}
+
+/* 指标分段切换 —— 4 列 */
+.metric-segs {
+  display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 0;
+  border: 1px solid var(--ink-0); border-radius: 10px; overflow: hidden;
+  background: var(--paper-2);
+}
+.metric-segs .seg {
+  padding: 14px 4px; text-align: center; cursor: pointer; user-select: none;
+  background: transparent; border-right: 1px solid var(--line-2);
+  transition: all 0.2s ease; position: relative;
+}
+.metric-segs .seg:last-child { border-right: none; }
+.metric-segs .seg .label {
+  font-family: "Noto Serif SC", serif; font-weight: 700; font-size: 14.5px;
+  color: var(--ink-1); letter-spacing: 0.03em;
+}
+.metric-segs .seg.active { background: var(--ink-0); }
+.metric-segs .seg.active .label { color: var(--paper-2); }
+.metric-segs .seg.active::before {
+  content: ""; position: absolute; top: 5px; left: 50%; transform: translateX(-50%);
+  width: 6px; height: 6px; border-radius: 50%; background: var(--cinnabar);
+}
+.metric-segs .seg:hover:not(.active) { background: rgba(197,70,46,0.04); }
+
+/* 层级筛选 */
+.level-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill {
+  padding: 10px 18px; font-size: 14px; cursor: pointer; user-select: none;
+  background: var(--paper-2); border: 1px solid var(--line-2); border-radius: 100px;
+  color: var(--ink-1); transition: all 0.2s ease;
+  font-family: "Noto Serif SC", serif; font-weight: 500;
+}
+.pill:hover { border-color: var(--ink-0); color: var(--ink-0); }
+.pill.active {
+  background: var(--ink-0); color: var(--paper-2); border-color: var(--ink-0);
+  box-shadow: 0 2px 0 var(--cinnabar);
+}
+
+/* 开关 */
+.toggles { display: flex; flex-direction: column; gap: 4px; }
+.tog-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 0; font-size: 15px; color: var(--ink-0);
+}
+.tog-row .lbl { display: flex; align-items: center; gap: 12px; font-family: "Noto Serif SC", serif; font-weight: 500; }
+.tog-row .ico { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.tog-row .ico.heat {
+  background: linear-gradient(135deg, #7fbf8c, #d9a14f, #c5462e);
+  box-shadow: 0 0 8px rgba(197,70,46,0.4);
+}
+.tog-row .ico.dot { background: var(--ink-0); box-shadow: 0 0 0 2px var(--paper-1), 0 0 0 3px var(--ink-0); }
+.tog-row .ico.ring { background: transparent; border: 2px solid var(--mgr-b); }
+.tog-row .ico.star {
+  background: var(--cinnabar);
+  clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+  border-radius: 0;
+}
+.tog { position: relative; width: 40px; height: 22px; }
+.tog input { opacity: 0; width: 0; height: 0; }
+.tog .trk {
+  position: absolute; inset: 0; background: var(--paper-2); border: 1px solid var(--line-2);
+  border-radius: 100px; cursor: pointer; transition: 0.25s;
+}
+.tog .trk::before {
+  content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px;
+  background: var(--ink-2); border-radius: 50%; transition: 0.25s;
+}
+.tog input:checked + .trk { background: var(--cinnabar); border-color: var(--cinnabar); }
+.tog input:checked + .trk::before { left: 20px; background: var(--paper-2); }
+
+/* 排行榜 */
+.rank-table { display: flex; flex-direction: column; }
+.rank-row {
+  display: grid; grid-template-columns: 36px 1fr auto;
+  padding: 14px 0; gap: 14px; align-items: center;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer; transition: background 0.15s;
+}
+.rank-row:last-child { border-bottom: none; }
+.rank-row:hover { background: rgba(197,70,46,0.05); }
+.rank-row .num {
+  font-family: "Fraunces", serif; font-style: italic; font-weight: 500;
+  font-size: 22px; color: var(--ink-3); text-align: right; line-height: 1;
+}
+.rank-row.top1 .num { color: var(--cinnabar); font-weight: 900; }
+.rank-row.top2 .num { color: var(--amber); font-weight: 700; }
+.rank-row.top3 .num { color: var(--jade); font-weight: 700; }
+.rank-row .info { min-width: 0; }
+.rank-row .name {
+  font-family: "Noto Serif SC", serif; font-weight: 700; font-size: 15px;
+  color: var(--ink-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-bottom: 4px; letter-spacing: 0.02em;
+  display: flex; align-items: center; gap: 7px;
+}
+.rank-row .name .mgr-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 1.5px; flex-shrink: 0;
+}
+.rank-row .name .mgr-dot.m-a { background: var(--mgr-a); }
+.rank-row .name .mgr-dot.m-b   { background: var(--mgr-b); }
+.rank-row .lvl {
+  font-size: 12px; color: var(--ink-2); letter-spacing: 0.05em;
+}
+.rank-row .val {
+  font-family: "Fraunces", "Noto Serif SC", serif; font-size: 15.5px; font-weight: 700;
+  color: var(--cinnabar); white-space: nowrap;
+}
+
+/* 入场动画 */
+@keyframes rise { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: none } }
+.section, .legend, .geo-tag, .ribbon .kpi, .mgr-tab { animation: rise 0.7s cubic-bezier(0.16,1,0.3,1) both; }
+.section:nth-child(1) { animation-delay: 0.05s }
+.section:nth-child(2) { animation-delay: 0.13s }
+.section:nth-child(3) { animation-delay: 0.21s }
+.section:nth-child(4) { animation-delay: 0.29s }
+.legend { animation-delay: 0.4s }
+.geo-tag { animation-delay: 0.5s }
+.ribbon .kpi:nth-child(1) { animation-delay: 0.05s }
+.ribbon .kpi:nth-child(2) { animation-delay: 0.10s }
+.ribbon .kpi:nth-child(3) { animation-delay: 0.15s }
+.ribbon .kpi:nth-child(4) { animation-delay: 0.20s }
+.mgr-tab:nth-child(1) { animation-delay: 0.05s }
+.mgr-tab:nth-child(2) { animation-delay: 0.10s }
+.mgr-tab:nth-child(3) { animation-delay: 0.15s }
+
+/* 空数据提示 */
+.empty {
+  font-family: "Noto Serif SC", serif; font-style: italic; font-size: 15px;
+  color: var(--ink-3); text-align: center; padding: 36px 0;
+}
+
+/* ============================================================
+   v5 · 市州边界层 —— 浅蓝底线勾勒行政范围
+   ============================================================ */
+.city-outline      { transition: opacity .2s ease; }
+.city-label {
+  font-family: "Noto Serif SC", serif; font-weight: 700; font-size: 12.5px;
+  color: #4a7fb0; letter-spacing: 0.06em; white-space: nowrap;
+  text-shadow: 0 0 3px #fffbf2, 0 0 6px #fffbf2, 0 1px 0 #fffbf2;
+  pointer-events: none; transform: translate(-50%, -50%);
+}
+.city-label.is-mine { color: #2f6ea8; font-size: 13.5px; }
+.tog-row .ico.bound {
+  background: rgba(143,184,220,0.35); border: 1.5px solid #8fb8dc; border-radius: 3px;
+}
+</style>
+</head>
+<body>
+
+<!-- ============== 顶部 ============== -->
+<header class="masthead">
+  <div class="brand">
+    <div class="seal">川</div>
+    <div>
+      <div class="name">四川景区<span class="bullet">·</span>经营热力图谱</div>
+      <div class="sub" id="brand-sub">阿坝州、广安、南充 · 27 处景点</div>
+    </div>
+  </div>
+
+  <div class="ribbon">
+    <div class="kpi">
+      <div class="lbl">景点数量</div>
+      <div class="val" id="kpi-count">—<span class="unit">个</span></div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">总营业额</div>
+      <div class="val" id="kpi-gmv">—</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">总毛利</div>
+      <div class="val" id="kpi-profit">—</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">平均毛利率</div>
+      <div class="val" id="kpi-margin">—<span class="unit">%</span></div>
+    </div>
+  </div>
+
+  <div class="meta">
+    <div class="period"><span class="demo-badge">示意数据</span>近 12 个月 · 示意周期</div>
+    <div class="mgr-tabs" id="mgr-tabs">
+      <div class="mgr-tab" data-mgr="all">
+        <div class="mini-seal">全</div>
+        <div class="txt"><div class="n">全区域</div><div class="r">双区域·55处</div></div>
+      </div>
+      <div class="mgr-tab active" data-mgr="a">
+        <div class="mini-seal">A</div>
+        <div class="txt"><div class="n">区域 A</div><div class="r">阿坝·广安·南充</div></div>
+      </div>
+      <div class="mgr-tab" data-mgr="b">
+        <div class="mini-seal">B</div>
+        <div class="txt"><div class="n">区域 B</div><div class="r">雅安·绵阳·眉山</div></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============== 主体 ============== -->
+<div class="stage">
+
+  <!-- ============== 地图 ============== -->
+  <main class="canvas">
+    <div id="map"></div>
+
+    <div class="crosshair tl"></div>
+    <div class="crosshair tr"></div>
+    <div class="crosshair bl"></div>
+    <div class="crosshair br"></div>
+
+    <div class="geo-tag">
+      <div class="badge">区 域</div>
+      <div class="name">四川</div>
+      <div class="rule"></div>
+      <div class="coord" id="geo-coord">N 30.5° — 34.0°　E 100.5° — 107.5°</div>
+      <div class="mgr-line">区 域 · <span class="who" id="geo-mgr" data-m="a">区域 A</span></div>
+    </div>
+
+    <!-- 图例 -->
+    <div class="legend">
+      <div class="ttl" id="legend-title">GMV <em>·</em> 热力分布</div>
+      <div class="desc">颜色越红代表该区域指标累计越高 · 已剔除极值参与分档<br><strong>本页所有数值均为脱敏示意数据，不代表任何真实经营结果。</strong></div>
+      <div class="scale"></div>
+      <div class="ticks">
+        <span id="legend-min">—</span>
+        <span id="legend-mid">—</span>
+        <span id="legend-max">—</span>
+      </div>
+      <div class="ticks lbl-row">
+        <span>低 值</span>
+        <span>中 等</span>
+        <span>高 值</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============== 右侧面板 ============== -->
+  <aside class="panel">
+
+    <div class="section">
+      <div class="h">
+        <div class="title">分析<span class="dot">·</span>指标</div>
+        <div class="badge">切换</div>
+      </div>
+      <div class="metric-segs" id="metric-segs">
+        <div class="seg active" data-metric="gmv"><div class="label">GMV</div></div>
+        <div class="seg" data-metric="profit"><div class="label">毛利值</div></div>
+        <div class="seg" data-metric="margin"><div class="label">毛利率</div></div>
+        <div class="seg" data-metric="arpu"><div class="label">单客价值</div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="h">
+        <div class="title">景点<span class="dot">·</span>层级</div>
+        <div class="badge">筛选</div>
+      </div>
+      <div class="level-pills" id="level-pills"></div>
+    </div>
+
+    <div class="section">
+      <div class="h">
+        <div class="title">图层<span class="dot">·</span>开关</div>
+        <div class="badge">显示</div>
+      </div>
+      <div class="toggles">
+        <div class="tog-row">
+          <div class="lbl"><span class="ico heat"></span><span>热力图</span></div>
+          <label class="tog"><input type="checkbox" id="t-heat" checked><span class="trk"></span></label>
+        </div>
+        <div class="tog-row">
+          <div class="lbl"><span class="ico dot"></span><span>景点标记</span></div>
+          <label class="tog"><input type="checkbox" id="t-mark" checked><span class="trk"></span></label>
+        </div>
+        <div class="tog-row">
+          <div class="lbl"><span class="ico bound"></span><span>市州边界</span></div>
+          <label class="tog"><input type="checkbox" id="t-bound" checked><span class="trk"></span></label>
+        </div>
+        <div class="tog-row">
+          <div class="lbl"><span class="ico ring"></span><span>区域识别外环</span></div>
+          <label class="tog"><input type="checkbox" id="t-mgr"><span class="trk"></span></label>
+        </div>
+        <div class="tog-row">
+          <div class="lbl"><span class="ico star"></span><span>剔除极值参与分档</span></div>
+          <label class="tog"><input type="checkbox" id="t-outlier" checked><span class="trk"></span></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="h">
+        <div class="title">榜单<span class="dot">·</span>排行</div>
+        <div class="badge" id="rank-meta">前 10 名</div>
+      </div>
+      <div class="rank-table" id="rank-table"></div>
+    </div>
+
+  </aside>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script>
+/* ============================================================
+   数据源 —— 示意数据集(数值已脱敏,不代表任何真实经营口径)
+   ============================================================ */
+const RAW = [
+  {name:"九寨沟风景区",level:"头部景区",region:"四川省阿坝州九寨沟县",mgr:"a",lat:33.26,lng:103.92,gmv:131313431,tickets:1138053,profit:302793,arpu:115.38,margin:0.23},
+  {name:"四姑娘山景区",level:"重点景区",region:"四川省阿坝州小金县",mgr:"a",lat:31.1047,lng:102.899,gmv:37134550,tickets:453771,profit:183396,arpu:81.84,margin:0.49},
+  {name:"黄龙风景名胜区",level:"重点景区",region:"四川省阿坝州松潘县",mgr:"a",lat:32.7508,lng:103.8222,gmv:11249849,tickets:146287,profit:45041,arpu:76.90,margin:0.40},
+  {name:"毕棚沟",level:"重点景区",region:"四川省阿坝州理县",mgr:"a",lat:31.0728,lng:102.8946,gmv:6720190,tickets:183652,profit:16886,arpu:36.59,margin:0.25},
+  {name:"四姑娘山双桥沟景区",level:"重点景区",region:"四川省阿坝州小金县",mgr:"a",lat:31.16,lng:102.807,gmv:10717326,tickets:121567,profit:25325,arpu:88.16,margin:0.24},
+  {name:"达古冰川风景名胜区",level:"重点景区",region:"四川省阿坝州黑水县",mgr:"a",lat:32.2,lng:102.82,gmv:8071320,tickets:43652,profit:393747,arpu:184.90,margin:4.88},
+  {name:"卧龙中华大熊猫苑神树坪基地",level:"重点景区",region:"四川省阿坝州汶川县",mgr:"a",lat:31.025,lng:103.11,gmv:4199534,tickets:72732,profit:70998,arpu:57.74,margin:1.69},
+  {name:"九寨千古情",level:"重点景区",region:"四川省阿坝州九寨沟县",mgr:"a",lat:33.264,lng:104.234,gmv:2928268,tickets:13383,profit:342114,arpu:218.81,margin:11.68},
+  {name:"黄河九曲第一湾",level:"重点景区",region:"四川省阿坝州若尔盖县",mgr:"a",lat:33.5667,lng:102.95,gmv:2629760,tickets:44472,profit:36322,arpu:59.13,margin:1.38},
+  {name:"若尔盖花湖生态旅游区",level:"重点景区",region:"四川省阿坝州若尔盖县",mgr:"a",lat:33.934,lng:102.89,gmv:2053899,tickets:41937,profit:28680,arpu:48.98,margin:1.40},
+  {name:"莲宝叶则景区",level:"重点景区",region:"四川省阿坝州阿坝县",mgr:"a",lat:32.03,lng:100.95,gmv:1970164,tickets:28460,profit:25972,arpu:69.23,margin:1.32},
+  {name:"叠溪松坪沟景区",level:"重点景区",region:"四川省阿坝州茂县",mgr:"a",lat:32.1,lng:103.73,gmv:1807821,tickets:46179,profit:135508,arpu:39.15,margin:7.50},
+  {name:"四姑娘山长坪沟景区",level:"重点景区",region:"四川省阿坝州小金县",mgr:"a",lat:31.08,lng:102.9,gmv:604149,tickets:11124,profit:2399,arpu:54.31,margin:0.40},
+  {name:"神仙池风景区",level:"重点景区",region:"四川省阿坝州九寨沟县",mgr:"a",lat:32.9,lng:103.63,gmv:327157,tickets:5608,profit:17411,arpu:58.34,margin:5.32},
+  {name:"太子岭滑雪场",level:"重点景区",region:"四川省阿坝州黑水县",mgr:"a",lat:32.07,lng:102.76,gmv:295980,tickets:1802,profit:19353,arpu:164.25,margin:6.54},
+  {name:"九鼎山",level:"重点景区",region:"四川省阿坝州茂县",mgr:"a",lat:31.9,lng:103.7,gmv:135039,tickets:756,profit:6490,arpu:178.62,margin:4.81},
+  {name:"鹧鸪山自然公园滑雪场",level:"重点景区",region:"四川省阿坝州理县",mgr:"a",lat:31.59,lng:102.96,gmv:173005,tickets:1894,profit:5635,arpu:91.34,margin:3.26},
+  {name:"阆中古城",level:"重点景区",region:"四川省南充阆中市",mgr:"a",lat:31.558,lng:106.005,gmv:119518,tickets:2559,profit:7709,arpu:46.70,margin:6.45},
+  {name:"华蓥山",level:"重点景区",region:"四川省广安华蓥市",mgr:"a",lat:30.38,lng:106.76,gmv:170237,tickets:4437,profit:11567,arpu:38.37,margin:6.79},
+  {name:"鹧鸪山",level:"重点景区",region:"四川省阿坝州理县",mgr:"a",lat:31.6,lng:102.98,gmv:96323,tickets:1432,profit:677,arpu:67.26,margin:0.70},
+  {name:"牟尼沟风景区",level:"长尾景区",region:"四川省阿坝州松潘县",mgr:"a",lat:32.6,lng:103.55,gmv:1025624,tickets:19485,profit:1664,arpu:52.64,margin:0.16},
+  {name:"华蓥山天意谷景区",level:"长尾景区",region:"四川省广安邻水县",mgr:"a",lat:30.33,lng:106.85,gmv:93022,tickets:1697,profit:1440,arpu:54.82,margin:1.55},
+  {name:"红原—若尔盖大草原",level:"长尾景区",region:"四川省阿坝州红原/若尔盖",mgr:"a",lat:32.8,lng:102.55,gmv:47255,tickets:749,profit:656,arpu:63.09,margin:1.39},
+  {name:"松潘古城",level:"长尾景区",region:"四川省阿坝州松潘县",mgr:"a",lat:32.638,lng:103.605,gmv:16403,tickets:774,profit:1229,arpu:21.19,margin:7.49},
+  {name:"阿坝州汶川特别旅游区",level:"长尾景区",region:"四川省阿坝州汶川县",mgr:"a",lat:31.48,lng:103.58,gmv:8621,tickets:145,profit:284,arpu:59.46,margin:3.29},
+  {name:"5·12汶川特大地震映秀震中纪念馆",level:"长尾景区",region:"四川省阿坝州汶川县",mgr:"a",lat:31.061,lng:103.496,gmv:9303,tickets:309,profit:333,arpu:30.11,margin:3.58},
+  {name:"朱德故里景区",level:"长尾景区",region:"四川省南充仪陇县",mgr:"a",lat:31.25,lng:106.3,gmv:43,tickets:16,profit:8,arpu:2.69,margin:18.60},
+  {name:"蒙顶山",level:"重点景区",region:"四川省雅安名山区",mgr:"b",lat:30.0759,lng:103.0477,gmv:4878946,tickets:223204,profit:213117,arpu:21.86,margin:4.37},
+  {name:"二郎山喇叭河风景区",level:"重点景区",region:"四川省雅安天全县",mgr:"b",lat:30.1775,lng:102.42,gmv:11231358,tickets:362493,profit:257071,arpu:30.98,margin:2.29},
+  {name:"越王楼",level:"重点景区",region:"四川省绵阳游仙区",mgr:"b",lat:31.4675,lng:104.6791,gmv:3366436,tickets:117139,profit:434072,arpu:28.74,margin:12.89},
+  {name:"瓦屋山景区",level:"重点景区",region:"四川省眉山洪雅县",mgr:"b",lat:29.6765,lng:102.9934,gmv:6378700,tickets:63306,profit:198952,arpu:100.76,margin:3.12},
+  {name:"窦圌山景区",level:"重点景区",region:"四川省绵阳江油市",mgr:"b",lat:31.9094,lng:104.813,gmv:2262382,tickets:61582,profit:28589,arpu:36.74,margin:1.26},
+  {name:"碧峰峡景区",level:"重点景区",region:"四川省雅安碧峰峡",mgr:"b",lat:30.0773,lng:102.988,gmv:3698181,tickets:54998,profit:50921,arpu:67.24,margin:1.38},
+  {name:"绵阳方特东方神画",level:"重点景区",region:"四川省绵阳江油市",mgr:"b",lat:31.7288,lng:104.709,gmv:3771165,tickets:26291,profit:50863,arpu:143.44,margin:1.35},
+  {name:"眉山三苏祠博物馆",level:"重点景区",region:"四川省眉山东坡区",mgr:"b",lat:30.0432,lng:103.8297,gmv:1066174,tickets:43905,profit:2397,arpu:24.28,margin:0.22},
+  {name:"绵阳中华大熊猫苑",level:"重点景区",region:"四川省绵阳涪城区",mgr:"b",lat:31.53,lng:104.66,gmv:737264,tickets:24566,profit:23143,arpu:30.01,margin:3.14},
+  {name:"碧峰峡野生动物世界",level:"重点景区",region:"四川省雅安碧峰峡",mgr:"b",lat:30.0772,lng:102.9881,gmv:2426731,tickets:20146,profit:28518,arpu:120.46,margin:1.18},
+  {name:"达瓦更扎",level:"重点景区",region:"四川省雅安宝兴县",mgr:"b",lat:30.7231,lng:102.7139,gmv:1861821,tickets:21905,profit:104240,arpu:85.00,margin:5.60},
+  {name:"九皇山",level:"重点景区",region:"四川省绵阳北川县",mgr:"b",lat:31.9347,lng:104.6897,gmv:1751357,tickets:12196,profit:53501,arpu:143.60,margin:3.05},
+  {name:"中华洞天",level:"重点景区",region:"四川省绵阳江油市",mgr:"b",lat:31.8491,lng:104.6131,gmv:1014094,tickets:14670,profit:3741,arpu:69.13,margin:0.37},
+  {name:"牛背山",level:"重点景区",region:"四川省雅安荥经县",mgr:"b",lat:29.8529,lng:102.4008,gmv:764717,tickets:11058,profit:24737,arpu:69.16,margin:3.23},
+  {name:"龙苍沟国家森林公园",level:"重点景区",region:"四川省雅安荥经县",mgr:"b",lat:29.557,lng:102.7961,gmv:223908,tickets:6299,profit:8230,arpu:35.55,margin:3.68},
+  {name:"资阳方特水世界",level:"重点景区",region:"四川省资阳雁江区",mgr:"b",lat:30.1756,lng:104.5828,gmv:164059,tickets:2007,profit:3536,arpu:81.74,margin:2.16},
+  {name:"中国保护大熊猫研究中心雅安碧峰峡基地",level:"重点景区",region:"四川省雅安碧峰峡",mgr:"b",lat:30.08,lng:102.9947,gmv:198051,tickets:3925,profit:3083,arpu:50.46,margin:1.56},
+  {name:"自贡方特恐龙王国",level:"重点景区",region:"四川省自贡大安区",mgr:"b",lat:29.4022,lng:104.8259,gmv:257510,tickets:2769,profit:2622,arpu:93.00,margin:1.02},
+  {name:"资阳方特国色春秋",level:"长尾景区",region:"四川省资阳雁江区",mgr:"b",lat:30.176,lng:104.583,gmv:3408499,tickets:26043,profit:40402,arpu:130.88,margin:1.19},
+  {name:"平武报恩寺",level:"长尾景区",region:"四川省绵阳平武县",mgr:"b",lat:32.4087,lng:104.5328,gmv:1755254,tickets:84070,profit:19372,arpu:20.88,margin:1.10},
+  {name:"彭祖山景区",level:"长尾景区",region:"四川省眉山彭山区",mgr:"b",lat:30.2213,lng:103.9332,gmv:915163,tickets:47731,profit:25622,arpu:19.17,margin:2.80},
+  {name:"神木垒",level:"长尾景区",region:"四川省雅安宝兴县",mgr:"b",lat:30.6828,lng:102.6829,gmv:849169,tickets:34808,profit:39007,arpu:24.40,margin:4.59},
+  {name:"王岗坪景区",level:"长尾景区",region:"四川省雅安石棉县",mgr:"b",lat:29.4592,lng:102.2477,gmv:437251,tickets:4576,profit:23262,arpu:95.55,margin:5.32},
+  {name:"李白故居",level:"长尾景区",region:"四川省绵阳江油市",mgr:"b",lat:31.6716,lng:104.6853,gmv:441735,tickets:23250,profit:2789,arpu:19.00,margin:0.63},
+  {name:"绵阳科技馆",level:"长尾景区",region:"四川省绵阳游仙区",mgr:"b",lat:31.4797,lng:104.7725,gmv:215650,tickets:234453,profit:4352,arpu:0.92,margin:2.02},
+  {name:"江口沉银博物馆",level:"长尾景区",region:"四川省眉山彭山区",mgr:"b",lat:30.2278,lng:103.9083,gmv:216715,tickets:6579,profit:1205,arpu:32.94,margin:0.56},
+  {name:"圆觉洞摩崖造像风景区",level:"长尾景区",region:"四川省资阳安岳县",mgr:"b",lat:30.0908,lng:105.342,gmv:66861,tickets:4126,profit:323,arpu:16.20,margin:0.48},
+  {name:"卧佛院",level:"长尾景区",region:"四川省资阳安岳县",mgr:"b",lat:30.3036,lng:105.3158,gmv:2365,tickets:427,profit:12,arpu:5.54,margin:0.51},
+];
+
+const CITY_BOUNDARIES = [{"n":"成都市","c":[30.652,103.932],"r":[[[30.321,103.959],[30.265,103.998],[30.27,104.047],[30.227,104.117],[30.246,104.151],[30.33,104.193],[30.317,104.202],[30.314,104.232],[30.28,104.232],[30.267,104.243],[30.256,104.231],[30.242,104.265],[30.218,104.273],[30.186,104.365],[30.174,104.358],[30.162,104.386],[30.09,104.428],[30.101,104.45],[30.108,104.437],[30.121,104.458],[30.133,104.449],[30.157,104.468],[30.156,104.485],[30.182,104.484],[30.197,104.569],[30.22,104.6],[30.244,104.6],[30.24,104.653],[30.268,104.638],[30.283,104.644],[30.275,104.692],[30.302,104.704],[30.308,104.724],[30.29,104.739],[30.302,104.775],[30.279,104.795],[30.297,104.807],[30.307,104.849],[30.339,104.85],[30.362,104.837],[30.347,104.855],[30.364,104.861],[30.361,104.881],[30.382,104.896],[30.394,104.882],[30.437,104.875],[30.513,104.876],[30.542,104.893],[30.582,104.859],[30.58,104.819],[30.598,104.82],[30.631,104.847],[30.649,104.843],[30.644,104.821],[30.664,104.818],[30.694,104.789],[30.721,104.789],[30.727,104.751],[30.826,104.698],[30.882,104.521],[30.918,104.533],[30.936,104.512],[30.951,104.465],[30.942,104.396],[30.926,104.39],[30.934,104.367],[30.902,104.352],[30.892,104.322],[30.913,104.15],[30.926,104.143],[30.951,104.166],[30.993,104.167],[31.033,104.095],[31.104,104.02],[31.168,104.015],[31.234,103.929],[31.272,103.928],[31.308,103.892],[31.326,103.894],[31.355,103.928],[31.416,103.898],[31.412,103.829],[31.432,103.816],[31.434,103.787],[31.419,103.75],[31.399,103.74],[31.391,103.701],[31.355,103.669],[31.338,103.57],[31.191,103.583],[31.101,103.526],[31.041,103.505],[31.03,103.517],[30.972,103.516],[30.942,103.465],[30.893,103.451],[30.865,103.409],[30.851,103.355],[30.825,103.338],[30.811,103.305],[30.842,103.258],[30.846,103.199],[30.842,103.166],[30.793,103.124],[30.813,103.084],[30.778,102.993],[30.746,103.005],[30.719,103.034],[30.704,103.031],[30.716,103.069],[30.655,103.132],[30.594,103.127],[30.586,103.148],[30.556,103.166],[30.53,103.158],[30.525,103.181],[30.512,103.186],[30.473,103.162],[30.471,103.142],[30.451,103.126],[30.38,103.116],[30.367,103.128],[30.303,103.062],[30.27,103.061],[30.22,103.077],[30.207,103.147],[30.248,103.184],[30.232,103.212],[30.209,103.216],[30.213,103.233],[30.243,103.243],[30.264,103.282],[30.26,103.314],[30.235,103.32],[30.228,103.37],[30.168,103.361],[30.148,103.372],[30.137,103.361],[30.095,103.395],[30.12,103.444],[30.097,103.451],[30.096,103.462],[30.114,103.468],[30.132,103.451],[30.131,103.475],[30.104,103.486],[30.161,103.544],[30.178,103.534],[30.204,103.597],[30.195,103.617],[30.215,103.628],[30.2,103.65],[30.229,103.648],[30.246,103.693],[30.27,103.682],[30.286,103.737],[30.305,103.728],[30.308,103.751],[30.346,103.795],[30.348,103.874],[30.329,103.888],[30.331,103.91],[30.354,103.914],[30.358,103.942],[30.346,103.936],[30.321,103.959]]]},{"n":"自贡市","c":[29.284,104.685],"r":[[[29.196,104.177],[29.221,104.196],[29.236,104.191],[29.206,104.233],[29.212,104.256],[29.232,104.265],[29.261,104.249],[29.241,104.323],[29.239,104.443],[29.221,104.435],[29.222,104.461],[29.156,104.509],[29.143,104.541],[29.207,104.624],[29.199,104.692],[29.156,104.68],[29.118,104.698],[29.122,104.715],[29.106,104.73],[29.079,104.737],[29.045,104.705],[28.997,104.72],[29,104.797],[28.991,104.812],[29.002,104.82],[29.003,104.858],[29.02,104.862],[29.024,104.88],[29.051,104.881],[29.059,104.942],[29.021,104.945],[29.016,104.97],[28.992,104.986],[28.99,105.005],[28.936,105.074],[28.947,105.162],[28.93,105.168],[28.929,105.202],[28.952,105.205],[28.956,105.217],[28.935,105.226],[28.927,105.254],[28.939,105.268],[28.957,105.24],[28.98,105.267],[29.01,105.269],[29.027,105.234],[29.016,105.215],[29.027,105.188],[29.057,105.189],[29.12,105.25],[29.135,105.245],[29.16,105.272],[29.175,105.257],[29.189,105.267],[29.215,105.236],[29.206,105.218],[29.222,105.195],[29.24,105.204],[29.263,105.161],[29.257,105.135],[29.285,105.114],[29.302,105.12],[29.336,105.073],[29.365,105.064],[29.383,105.035],[29.409,105.047],[29.407,105.079],[29.422,105.084],[29.481,105.044],[29.473,105.031],[29.462,105.041],[29.454,105.021],[29.44,105.027],[29.439,104.993],[29.417,104.962],[29.445,104.937],[29.434,104.918],[29.459,104.872],[29.471,104.874],[29.468,104.849],[29.43,104.834],[29.457,104.809],[29.454,104.751],[29.432,104.741],[29.403,104.751],[29.406,104.766],[29.375,104.76],[29.382,104.738],[29.363,104.745],[29.361,104.711],[29.382,104.674],[29.399,104.673],[29.445,104.62],[29.423,104.588],[29.441,104.57],[29.432,104.559],[29.441,104.544],[29.419,104.536],[29.457,104.51],[29.457,104.535],[29.519,104.53],[29.563,104.483],[29.583,104.494],[29.609,104.474],[29.6,104.443],[29.621,104.395],[29.607,104.382],[29.584,104.384],[29.566,104.341],[29.607,104.309],[29.614,104.281],[29.632,104.27],[29.636,104.25],[29.623,104.251],[29.613,104.212],[29.633,104.182],[29.598,104.167],[29.59,104.14],[29.557,104.167],[29.521,104.135],[29.522,104.151],[29.496,104.167],[29.471,104.15],[29.498,104.128],[29.462,104.088],[29.472,104.064],[29.457,104.053],[29.426,104.058],[29.437,104.098],[29.415,104.106],[29.416,104.092],[29.392,104.09],[29.382,104.101],[29.4,104.131],[29.375,104.141],[29.38,104.161],[29.364,104.163],[29.356,104.142],[29.339,104.135],[29.348,104.083],[29.324,104.077],[29.307,104.139],[29.284,104.146],[29.264,104.116],[29.242,104.11],[29.236,104.118],[29.257,104.144],[29.194,104.151],[29.196,104.177]]]},{"n":"攀枝花市","c":[26.756,101.625],"r":[[[26.082,101.84],[26.16,101.841],[26.191,101.907],[26.244,101.902],[26.323,101.935],[26.362,101.928],[26.411,101.939],[26.419,101.929],[26.449,101.943],[26.455,101.982],[26.431,101.995],[26.423,102.02],[26.434,102.029],[26.471,102.033],[26.494,102.051],[26.541,102.034],[26.572,102.039],[26.597,102.031],[26.599,102.011],[26.634,102.001],[26.639,101.984],[26.654,101.996],[26.699,101.997],[26.711,101.977],[26.736,101.982],[26.708,101.947],[26.639,101.939],[26.636,101.921],[26.723,101.913],[26.724,101.861],[26.764,101.834],[26.765,101.82],[26.793,101.814],[26.824,101.773],[26.836,101.731],[26.874,101.708],[26.944,101.699],[26.993,101.773],[27.102,101.817],[27.133,101.762],[27.129,101.709],[27.15,101.682],[27.245,101.643],[27.289,101.665],[27.314,101.659],[27.328,101.634],[27.34,101.635],[27.34,101.598],[27.278,101.53],[27.23,101.515],[27.239,101.471],[27.216,101.419],[27.191,101.427],[27.145,101.394],[27.185,101.355],[27.18,101.335],[27.198,101.316],[27.198,101.283],[27.179,101.246],[27.183,101.197],[27.165,101.168],[27.104,101.145],[27.095,101.157],[27.022,101.137],[26.984,101.227],[26.959,101.227],[26.956,101.265],[26.924,101.256],[26.903,101.268],[26.903,101.312],[26.888,101.323],[26.884,101.365],[26.84,101.4],[26.8,101.372],[26.786,101.38],[26.771,101.358],[26.75,101.39],[26.723,101.39],[26.726,101.422],[26.741,101.436],[26.73,101.457],[26.774,101.446],[26.787,101.466],[26.769,101.513],[26.746,101.492],[26.732,101.499],[26.704,101.455],[26.691,101.454],[26.673,101.481],[26.641,101.461],[26.607,101.462],[26.605,101.4],[26.556,101.407],[26.532,101.423],[26.538,101.438],[26.513,101.44],[26.495,101.459],[26.5,101.507],[26.467,101.53],[26.455,101.566],[26.396,101.636],[26.36,101.631],[26.347,101.661],[26.319,101.64],[26.311,101.66],[26.303,101.597],[26.284,101.586],[26.262,101.594],[26.225,101.63],[26.242,101.69],[26.224,101.705],[26.22,101.736],[26.168,101.773],[26.156,101.808],[26.115,101.797],[26.087,101.82],[26.082,101.84]],[[26.813,102.182],[26.848,102.156],[26.852,102.205],[26.889,102.214],[26.91,102.205],[26.924,102.226],[26.945,102.229],[26.957,102.214],[27,102.23],[27.046,102.218],[27.064,102.239],[27.107,102.241],[27.138,102.176],[27.182,102.161],[27.146,102.086],[27.083,102.05],[27.076,102.034],[27.093,102.026],[27.097,102],[27.115,101.994],[27.123,101.973],[27.104,101.939],[27.137,101.927],[27.144,101.941],[27.193,101.908],[27.244,101.912],[27.267,101.897],[27.19,101.878],[27.183,101.863],[27.168,101.879],[27.13,101.87],[27.123,101.833],[26.993,101.773],[26.944,101.699],[26.874,101.708],[26.836,101.731],[26.824,101.773],[26.793,101.814],[26.765,101.82],[26.764,101.834],[26.724,101.861],[26.723,101.913],[26.703,101.917],[26.71,101.96],[26.736,101.982],[26.711,101.977],[26.699,101.997],[26.716,102.007],[26.712,102.033],[26.738,102.046],[26.719,102.063],[26.693,102.055],[26.671,102.074],[26.657,102.068],[26.634,102.115],[26.638,102.132],[26.675,102.136],[26.681,102.157],[26.745,102.196],[26.764,102.193],[26.775,102.175],[26.792,102.19],[26.802,102.174],[26.813,102.182]],[[26.852,102.205],[26.848,102.156],[26.813,102.182],[26.814,102.216],[26.852,102.205]]]},{"n":"泸州市","c":[28.889,105.443],"r":[[[29.314,105.42],[29.309,105.395],[29.282,105.383],[29.293,105.365],[29.264,105.318],[29.188,105.281],[29.175,105.257],[29.16,105.272],[29.135,105.245],[29.12,105.25],[29.057,105.189],[29.027,105.188],[29.016,105.215],[29.027,105.234],[29.01,105.269],[28.98,105.267],[28.957,105.24],[28.939,105.268],[28.927,105.254],[28.935,105.226],[28.956,105.217],[28.952,105.205],[28.929,105.202],[28.93,105.168],[28.947,105.162],[28.942,105.145],[28.897,105.204],[28.818,105.215],[28.775,105.241],[28.747,105.204],[28.739,105.217],[28.716,105.219],[28.71,105.204],[28.696,105.211],[28.674,105.201],[28.65,105.168],[28.608,105.172],[28.569,105.208],[28.548,105.203],[28.523,105.237],[28.493,105.234],[28.446,105.191],[28.449,105.295],[28.436,105.294],[28.428,105.32],[28.386,105.323],[28.369,105.288],[28.313,105.337],[28.257,105.333],[28.153,105.358],[28.141,105.35],[28.134,105.275],[28.1,105.224],[28.073,105.204],[28.067,105.177],[28.04,105.184],[28.024,105.168],[27.996,105.184],[27.991,105.216],[28.009,105.246],[27.996,105.271],[27.929,105.281],[27.899,105.235],[27.845,105.25],[27.823,105.245],[27.819,105.314],[27.795,105.274],[27.771,105.293],[27.712,105.291],[27.706,105.31],[27.749,105.354],[27.775,105.44],[27.775,105.477],[27.754,105.537],[27.726,105.55],[27.716,105.604],[27.667,105.623],[27.66,105.643],[27.684,105.664],[27.685,105.721],[27.706,105.723],[27.719,105.784],[27.705,105.843],[27.733,105.868],[27.747,105.921],[27.728,105.93],[27.75,105.985],[27.747,106.023],[27.763,106.062],[27.777,106.064],[27.779,106.128],[27.754,106.194],[27.761,106.225],[27.82,106.342],[27.839,106.317],[27.865,106.34],[27.898,106.326],[27.899,106.305],[27.937,106.308],[27.958,106.328],[28.004,106.294],[28.012,106.246],[28.031,106.244],[28.067,106.267],[28.134,106.207],[28.167,106.122],[28.131,106.027],[28.111,106.037],[28.12,106.013],[28.108,105.976],[28.131,105.971],[28.144,105.945],[28.12,105.895],[28.128,105.876],[28.16,105.861],[28.238,105.889],[28.26,105.846],[28.307,105.823],[28.312,105.798],[28.336,105.786],[28.319,105.771],[28.309,105.787],[28.305,105.741],[28.272,105.73],[28.284,105.689],[28.31,105.67],[28.324,105.64],[28.362,105.655],[28.432,105.643],[28.439,105.613],[28.464,105.619],[28.474,105.61],[28.508,105.628],[28.535,105.685],[28.589,105.693],[28.591,105.721],[28.616,105.747],[28.59,105.758],[28.611,105.785],[28.595,105.885],[28.611,105.906],[28.621,105.89],[28.671,105.889],[28.682,105.936],[28.704,105.934],[28.714,105.956],[28.762,105.968],[28.738,106.009],[28.695,106.031],[28.686,106.08],[28.636,106.103],[28.645,106.145],[28.636,106.166],[28.578,106.192],[28.539,106.255],[28.537,106.293],[28.505,106.305],[28.482,106.331],[28.48,106.379],[28.527,106.373],[28.54,106.35],[28.533,106.342],[28.553,106.332],[28.584,106.347],[28.617,106.325],[28.634,106.33],[28.65,106.304],[28.665,106.322],[28.673,106.309],[28.732,106.288],[28.74,106.273],[28.779,106.268],[28.786,106.252],[28.815,106.244],[28.846,106.265],[28.905,106.207],[28.921,106.173],[28.902,106.149],[28.899,106.101],[28.92,106.071],[28.906,106.049],[28.918,106.039],[28.954,106.044],[28.953,106.017],[28.974,106.001],[28.966,105.97],[28.92,105.91],[28.9,105.91],[28.934,105.875],[28.927,105.853],[28.944,105.83],[28.936,105.798],[28.948,105.804],[28.978,105.788],[28.993,105.762],[29.014,105.766],[29.047,105.745],[29.066,105.758],[29.099,105.73],[29.122,105.735],[29.13,105.752],[29.134,105.729],[29.17,105.721],[29.176,105.704],[29.219,105.712],[29.287,105.695],[29.291,105.716],[29.299,105.705],[29.273,105.678],[29.277,105.665],[29.253,105.667],[29.253,105.648],[29.28,105.632],[29.256,105.608],[29.273,105.61],[29.278,105.558],[29.264,105.518],[29.285,105.509],[29.279,105.476],[29.322,105.466],[29.314,105.42]]]},{"n":"德阳市","c":[31.129,104.437],"r":[[[30.706,105.169],[30.706,105.158],[30.732,105.157],[30.759,105.116],[30.756,105.081],[30.772,105.071],[30.782,105.025],[30.806,104.999],[30.87,104.992],[30.865,104.96],[30.895,104.967],[30.897,104.945],[30.946,104.932],[30.935,104.876],[30.946,104.87],[30.946,104.841],[30.959,104.855],[30.998,104.826],[31.014,104.838],[31.024,104.826],[31.064,104.82],[31.1,104.775],[31.13,104.789],[31.132,104.762],[31.167,104.744],[31.163,104.72],[31.216,104.714],[31.233,104.742],[31.275,104.749],[31.281,104.732],[31.267,104.677],[31.331,104.657],[31.358,104.586],[31.402,104.585],[31.443,104.524],[31.408,104.497],[31.406,104.477],[31.385,104.479],[31.374,104.376],[31.382,104.347],[31.459,104.271],[31.464,104.236],[31.515,104.203],[31.519,104.156],[31.556,104.161],[31.565,104.146],[31.605,104.133],[31.631,104.103],[31.649,104.098],[31.678,104.117],[31.694,104.094],[31.698,104.041],[31.679,104.016],[31.682,103.989],[31.64,103.928],[31.564,103.907],[31.538,103.915],[31.513,103.898],[31.538,103.858],[31.472,103.796],[31.43,103.803],[31.432,103.816],[31.412,103.829],[31.416,103.898],[31.355,103.928],[31.326,103.894],[31.308,103.892],[31.272,103.928],[31.234,103.929],[31.168,104.015],[31.104,104.02],[31.033,104.095],[30.993,104.167],[30.951,104.166],[30.926,104.143],[30.913,104.15],[30.892,104.322],[30.902,104.352],[30.934,104.367],[30.926,104.39],[30.942,104.396],[30.951,104.465],[30.936,104.512],[30.918,104.533],[30.882,104.521],[30.826,104.698],[30.727,104.751],[30.721,104.789],[30.694,104.789],[30.664,104.818],[30.644,104.821],[30.649,104.843],[30.631,104.847],[30.598,104.82],[30.58,104.819],[30.582,104.859],[30.611,104.859],[30.618,104.879],[30.609,104.886],[30.626,104.911],[30.617,104.932],[30.601,104.93],[30.612,104.953],[30.529,104.984],[30.53,105.025],[30.546,105.023],[30.543,105.079],[30.584,105.095],[30.64,105.154],[30.653,105.143],[30.698,105.175],[30.706,105.169]]]},{"n":"绵阳市","c":[31.851,104.704],"r":[[[31.527,105.459],[31.562,105.396],[31.618,105.393],[31.63,105.333],[31.677,105.345],[31.719,105.315],[31.701,105.285],[31.707,105.254],[31.729,105.284],[31.74,105.283],[31.744,105.311],[31.771,105.308],[31.794,105.289],[31.791,105.264],[31.778,105.262],[31.795,105.244],[31.817,105.251],[31.83,105.243],[31.837,105.205],[31.882,105.223],[31.911,105.183],[31.946,105.205],[32,105.174],[31.996,105.194],[32.016,105.236],[31.983,105.252],[32.032,105.264],[32.033,105.25],[32.083,105.253],[32.109,105.286],[32.127,105.263],[32.14,105.286],[32.167,105.252],[32.193,105.273],[32.204,105.24],[32.225,105.262],[32.236,105.253],[32.263,105.271],[32.278,105.269],[32.272,105.254],[32.287,105.238],[32.301,105.255],[32.321,105.248],[32.303,105.177],[32.311,105.113],[32.303,105.087],[32.284,105.083],[32.288,105.045],[32.265,105.033],[32.248,104.995],[32.266,105],[32.297,104.964],[32.335,104.975],[32.326,104.912],[32.355,104.885],[32.351,104.841],[32.4,104.774],[32.465,104.749],[32.526,104.755],[32.554,104.71],[32.56,104.656],[32.58,104.651],[32.601,104.619],[32.669,104.636],[32.693,104.596],[32.722,104.583],[32.734,104.555],[32.728,104.527],[32.754,104.51],[32.749,104.459],[32.806,104.372],[32.822,104.365],[32.836,104.294],[32.891,104.277],[32.878,104.248],[33,104.113],[33.003,104.069],[33.041,104.013],[33.035,103.986],[32.94,103.959],[32.922,103.965],[32.917,103.953],[32.888,103.958],[32.879,103.994],[32.861,103.995],[32.84,103.971],[32.814,104.005],[32.82,104.032],[32.833,104.036],[32.857,104.079],[32.848,104.101],[32.801,104.108],[32.8,104.121],[32.757,104.147],[32.73,104.13],[32.711,104.156],[32.663,104.183],[32.579,104.168],[32.531,104.175],[32.474,104.144],[32.468,104.095],[32.492,104.132],[32.53,104.129],[32.569,104.084],[32.631,104.066],[32.652,104.036],[32.639,103.89],[32.614,103.853],[32.584,103.845],[32.511,103.907],[32.433,103.915],[32.365,103.889],[32.315,103.921],[32.306,103.982],[32.249,104.034],[32.249,104.067],[32.223,104.131],[32.25,104.162],[32.309,104.182],[32.298,104.211],[32.285,104.209],[32.249,104.248],[32.215,104.257],[32.215,104.222],[32.197,104.182],[32.15,104.142],[32.126,104.153],[32.14,104.129],[32.125,104.101],[32.131,104.049],[32.119,103.995],[32.141,103.975],[32.161,103.851],[32.127,103.855],[32.13,103.827],[32.098,103.812],[32.071,103.825],[31.998,103.758],[31.964,103.755],[31.946,103.764],[31.94,103.818],[31.921,103.846],[31.918,103.877],[31.942,103.921],[31.904,103.958],[31.856,103.975],[31.862,104.017],[31.829,104.061],[31.839,104.08],[31.816,104.152],[31.78,104.17],[31.732,104.171],[31.71,104.103],[31.694,104.094],[31.678,104.117],[31.649,104.098],[31.631,104.103],[31.605,104.133],[31.565,104.146],[31.556,104.161],[31.519,104.156],[31.515,104.203],[31.464,104.236],[31.459,104.271],[31.382,104.347],[31.374,104.376],[31.385,104.479],[31.406,104.477],[31.408,104.497],[31.443,104.524],[31.402,104.585],[31.358,104.586],[31.331,104.657],[31.267,104.677],[31.281,104.732],[31.275,104.749],[31.233,104.742],[31.216,104.714],[31.163,104.72],[31.167,104.744],[31.132,104.762],[31.13,104.789],[31.1,104.775],[31.064,104.82],[31.024,104.826],[31.014,104.838],[30.998,104.826],[30.959,104.855],[30.946,104.841],[30.937,104.892],[30.946,104.932],[30.897,104.945],[30.895,104.967],[30.865,104.96],[30.87,104.992],[30.806,104.999],[30.782,105.025],[30.772,105.071],[30.756,105.081],[30.759,105.116],[30.732,105.157],[30.706,105.158],[30.735,105.215],[30.726,105.244],[30.751,105.272],[30.823,105.26],[30.846,105.232],[30.877,105.229],[30.886,105.2],[30.897,105.194],[30.906,105.209],[30.96,105.177],[30.965,105.194],[30.992,105.195],[31.046,105.175],[31.076,105.2],[31.086,105.193],[31.108,105.224],[31.106,105.297],[31.126,105.344],[31.161,105.354],[31.153,105.381],[31.073,105.411],[31.064,105.474],[31.027,105.504],[31.011,105.566],[30.973,105.596],[30.978,105.619],[30.991,105.614],[31.003,105.634],[31,105.658],[31.017,105.663],[31.016,105.687],[31.039,105.714],[31.15,105.721],[31.169,105.707],[31.172,105.674],[31.249,105.675],[31.258,105.648],[31.284,105.638],[31.296,105.617],[31.289,105.599],[31.3,105.594],[31.34,105.606],[31.346,105.63],[31.371,105.642],[31.395,105.642],[31.407,105.621],[31.382,105.573],[31.403,105.569],[31.391,105.524],[31.402,105.499],[31.424,105.481],[31.455,105.502],[31.486,105.471],[31.475,105.458],[31.481,105.442],[31.499,105.463],[31.527,105.459]]]},{"n":"广元市","c":[32.262,105.786],"r":[[[31.527,105.459],[31.55,105.495],[31.574,105.498],[31.566,105.579],[31.581,105.599],[31.552,105.608],[31.554,105.618],[31.584,105.622],[31.588,105.64],[31.601,105.633],[31.614,105.654],[31.602,105.658],[31.609,105.685],[31.65,105.699],[31.664,105.724],[31.727,105.726],[31.719,105.749],[31.735,105.769],[31.668,105.818],[31.667,105.847],[31.651,105.838],[31.615,105.865],[31.631,105.886],[31.648,105.882],[31.626,105.911],[31.649,105.93],[31.665,105.925],[31.672,105.958],[31.662,105.977],[31.685,106.007],[31.697,106.078],[31.708,106.068],[31.767,106.129],[31.792,106.124],[31.791,106.111],[31.829,106.13],[31.807,106.154],[31.819,106.199],[31.786,106.195],[31.771,106.211],[31.782,106.248],[31.774,106.262],[31.811,106.27],[31.807,106.292],[31.848,106.336],[31.846,106.361],[31.802,106.384],[31.808,106.406],[31.832,106.416],[31.874,106.406],[31.89,106.425],[31.902,106.409],[31.943,106.446],[31.942,106.464],[31.977,106.445],[31.977,106.482],[32.025,106.509],[32.049,106.501],[32.05,106.52],[32.069,106.518],[32.082,106.534],[32.083,106.559],[32.098,106.535],[32.128,106.568],[32.176,106.557],[32.228,106.565],[32.25,106.666],[32.273,106.675],[32.269,106.718],[32.295,106.717],[32.285,106.755],[32.297,106.776],[32.323,106.745],[32.315,106.738],[32.337,106.726],[32.348,106.689],[32.454,106.69],[32.486,106.675],[32.504,106.649],[32.622,106.658],[32.637,106.645],[32.687,106.64],[32.689,106.589],[32.668,106.517],[32.649,106.498],[32.66,106.452],[32.64,106.451],[32.617,106.421],[32.627,106.389],[32.647,106.383],[32.672,106.351],[32.68,106.306],[32.671,106.279],[32.693,106.256],[32.698,106.174],[32.72,106.145],[32.72,106.12],[32.767,106.062],[32.783,106.066],[32.796,106.095],[32.824,106.094],[32.824,106.07],[32.852,106.047],[32.858,106.022],[32.83,106.012],[32.828,105.995],[32.849,105.969],[32.826,105.927],[32.838,105.893],[32.818,105.851],[32.826,105.831],[32.79,105.817],[32.772,105.823],[32.75,105.78],[32.768,105.769],[32.754,105.736],[32.76,105.719],[32.727,105.678],[32.699,105.596],[32.729,105.585],[32.732,105.556],[32.759,105.568],[32.792,105.556],[32.79,105.536],[32.848,105.525],[32.873,105.496],[32.921,105.487],[32.933,105.456],[32.931,105.426],[32.886,105.408],[32.879,105.381],[32.775,105.425],[32.768,105.453],[32.752,105.459],[32.733,105.449],[32.71,105.366],[32.683,105.347],[32.657,105.298],[32.653,105.262],[32.669,105.241],[32.666,105.22],[32.637,105.215],[32.601,105.144],[32.594,105.111],[32.637,105.079],[32.65,105.03],[32.601,104.882],[32.654,104.846],[32.663,104.821],[32.644,104.796],[32.635,104.74],[32.674,104.697],[32.663,104.668],[32.669,104.636],[32.601,104.619],[32.58,104.651],[32.56,104.656],[32.554,104.71],[32.526,104.755],[32.465,104.749],[32.4,104.774],[32.351,104.841],[32.355,104.885],[32.326,104.912],[32.335,104.975],[32.297,104.964],[32.266,105],[32.248,104.995],[32.265,105.033],[32.288,105.045],[32.284,105.083],[32.303,105.087],[32.311,105.113],[32.303,105.177],[32.321,105.248],[32.301,105.255],[32.287,105.238],[32.272,105.254],[32.278,105.269],[32.263,105.271],[32.236,105.253],[32.225,105.262],[32.204,105.24],[32.193,105.273],[32.167,105.252],[32.14,105.286],[32.127,105.263],[32.109,105.286],[32.083,105.253],[32.033,105.25],[32.032,105.264],[31.983,105.252],[32.016,105.236],[31.996,105.194],[32,105.174],[31.946,105.205],[31.911,105.183],[31.882,105.223],[31.837,105.205],[31.83,105.243],[31.817,105.251],[31.795,105.244],[31.778,105.262],[31.791,105.264],[31.794,105.289],[31.771,105.308],[31.744,105.311],[31.74,105.283],[31.729,105.284],[31.707,105.254],[31.701,105.285],[31.719,105.315],[31.677,105.345],[31.63,105.333],[31.618,105.393],[31.562,105.396],[31.527,105.459]]]},{"n":"遂宁市","c":[30.63,105.475],"r":[[[30.536,105.067],[30.523,105.06],[30.495,105.084],[30.482,105.077],[30.46,105.09],[30.442,105.09],[30.433,105.069],[30.426,105.09],[30.403,105.074],[30.396,105.097],[30.341,105.126],[30.342,105.151],[30.323,105.157],[30.306,105.219],[30.287,105.222],[30.28,105.258],[30.308,105.358],[30.278,105.369],[30.296,105.411],[30.26,105.426],[30.266,105.445],[30.239,105.481],[30.223,105.482],[30.203,105.521],[30.22,105.529],[30.213,105.547],[30.186,105.559],[30.173,105.58],[30.186,105.642],[30.221,105.655],[30.235,105.619],[30.276,105.625],[30.266,105.667],[30.254,105.671],[30.255,105.724],[30.277,105.735],[30.282,105.712],[30.323,105.715],[30.32,105.742],[30.337,105.735],[30.347,105.756],[30.357,105.752],[30.375,105.77],[30.385,105.76],[30.425,105.792],[30.437,105.818],[30.411,105.847],[30.392,105.846],[30.409,105.874],[30.406,105.899],[30.386,105.902],[30.396,105.917],[30.372,105.941],[30.376,106.001],[30.428,105.979],[30.425,105.964],[30.442,105.948],[30.453,105.95],[30.456,105.971],[30.514,105.954],[30.501,105.946],[30.517,105.934],[30.509,105.916],[30.494,105.927],[30.494,105.949],[30.467,105.918],[30.459,105.885],[30.496,105.884],[30.485,105.86],[30.492,105.847],[30.547,105.877],[30.603,105.824],[30.622,105.823],[30.625,105.809],[30.651,105.814],[30.785,105.782],[30.801,105.797],[30.877,105.731],[30.879,105.745],[30.906,105.732],[30.91,105.706],[30.934,105.692],[30.919,105.659],[30.942,105.66],[30.978,105.619],[30.973,105.596],[30.989,105.573],[31.011,105.566],[31.027,105.504],[31.064,105.474],[31.073,105.411],[31.153,105.381],[31.161,105.354],[31.126,105.344],[31.106,105.297],[31.108,105.224],[31.086,105.193],[31.076,105.2],[31.046,105.175],[30.992,105.195],[30.965,105.194],[30.96,105.177],[30.906,105.209],[30.897,105.194],[30.877,105.229],[30.846,105.232],[30.823,105.26],[30.751,105.272],[30.726,105.244],[30.735,105.215],[30.706,105.169],[30.698,105.175],[30.653,105.143],[30.64,105.154],[30.584,105.095],[30.536,105.067]]]},{"n":"内江市","c":[29.638,104.914],"r":[[[30.035,104.467],[30.001,104.455],[29.989,104.479],[29.951,104.462],[29.942,104.482],[29.935,104.473],[29.897,104.503],[29.811,104.477],[29.807,104.503],[29.785,104.47],[29.734,104.442],[29.732,104.416],[29.748,104.398],[29.738,104.36],[29.722,104.337],[29.702,104.35],[29.71,104.321],[29.695,104.308],[29.632,104.27],[29.614,104.281],[29.607,104.309],[29.566,104.341],[29.584,104.384],[29.607,104.382],[29.621,104.395],[29.6,104.443],[29.609,104.474],[29.601,104.489],[29.563,104.483],[29.519,104.53],[29.457,104.535],[29.457,104.51],[29.419,104.536],[29.441,104.544],[29.432,104.559],[29.441,104.57],[29.423,104.588],[29.445,104.62],[29.399,104.673],[29.382,104.674],[29.361,104.711],[29.363,104.745],[29.382,104.738],[29.375,104.76],[29.406,104.766],[29.403,104.751],[29.432,104.741],[29.454,104.751],[29.457,104.809],[29.43,104.834],[29.468,104.849],[29.471,104.874],[29.459,104.872],[29.434,104.918],[29.445,104.937],[29.417,104.962],[29.439,104.993],[29.44,105.027],[29.454,105.021],[29.462,105.041],[29.473,105.031],[29.481,105.044],[29.422,105.084],[29.407,105.079],[29.409,105.047],[29.383,105.035],[29.365,105.064],[29.336,105.073],[29.302,105.12],[29.285,105.114],[29.257,105.135],[29.263,105.161],[29.24,105.204],[29.222,105.195],[29.206,105.218],[29.215,105.236],[29.189,105.267],[29.188,105.281],[29.218,105.288],[29.282,105.339],[29.294,105.365],[29.282,105.383],[29.309,105.395],[29.314,105.42],[29.352,105.419],[29.365,105.437],[29.399,105.443],[29.419,105.427],[29.421,105.373],[29.439,105.399],[29.455,105.388],[29.449,105.324],[29.459,105.338],[29.553,105.29],[29.571,105.297],[29.578,105.318],[29.593,105.311],[29.61,105.322],[29.595,105.335],[29.62,105.347],[29.628,105.381],[29.643,105.378],[29.651,105.393],[29.677,105.39],[29.672,105.401],[29.688,105.424],[29.721,105.417],[29.747,105.393],[29.789,105.405],[29.797,105.383],[29.825,105.374],[29.834,105.36],[29.812,105.354],[29.821,105.298],[29.798,105.289],[29.796,105.253],[29.804,105.234],[29.818,105.238],[29.845,105.217],[29.847,105.176],[29.831,105.126],[29.849,105.095],[29.883,105.081],[29.885,105.101],[29.905,105.097],[29.923,105.064],[29.944,105.075],[29.948,105.049],[29.977,105.021],[29.977,104.994],[29.993,104.976],[29.993,104.952],[29.977,104.933],[29.947,104.924],[29.941,104.904],[29.936,104.927],[29.901,104.905],[29.913,104.879],[29.891,104.863],[29.885,104.828],[29.867,104.839],[29.875,104.805],[29.867,104.793],[29.853,104.809],[29.849,104.792],[29.861,104.781],[29.88,104.798],[29.909,104.748],[29.949,104.731],[29.964,104.685],[29.944,104.673],[29.933,104.709],[29.92,104.69],[29.902,104.687],[29.906,104.674],[29.957,104.644],[29.933,104.607],[29.951,104.578],[29.996,104.568],[30.008,104.546],[29.999,104.533],[30.027,104.524],[30.035,104.467]]]},{"n":"乐山市","c":[29.214,103.572],"r":[[[29.196,104.177],[29.194,104.151],[29.257,104.144],[29.236,104.118],[29.242,104.11],[29.264,104.116],[29.284,104.146],[29.307,104.139],[29.324,104.077],[29.348,104.083],[29.339,104.135],[29.356,104.142],[29.364,104.163],[29.38,104.161],[29.375,104.141],[29.4,104.131],[29.382,104.101],[29.392,104.09],[29.416,104.092],[29.415,104.106],[29.437,104.098],[29.426,104.058],[29.457,104.053],[29.472,104.064],[29.462,104.088],[29.498,104.128],[29.472,104.15],[29.496,104.166],[29.522,104.151],[29.521,104.135],[29.557,104.167],[29.59,104.14],[29.598,104.167],[29.633,104.182],[29.613,104.212],[29.623,104.251],[29.676,104.228],[29.666,104.204],[29.686,104.187],[29.705,104.191],[29.717,104.126],[29.744,104.089],[29.778,104.063],[29.814,104.089],[29.831,104.044],[29.847,104.056],[29.868,104.05],[29.87,104.004],[29.842,103.951],[29.828,103.962],[29.826,103.928],[29.805,103.935],[29.783,103.903],[29.776,103.913],[29.742,103.894],[29.747,103.856],[29.731,103.842],[29.707,103.765],[29.72,103.755],[29.714,103.705],[29.737,103.706],[29.759,103.688],[29.79,103.747],[29.816,103.729],[29.849,103.729],[29.899,103.693],[29.904,103.677],[29.92,103.678],[29.928,103.648],[29.909,103.608],[29.919,103.59],[29.902,103.59],[29.895,103.572],[29.881,103.585],[29.868,103.558],[29.879,103.514],[29.861,103.534],[29.842,103.533],[29.843,103.518],[29.815,103.486],[29.821,103.433],[29.771,103.439],[29.775,103.417],[29.805,103.394],[29.793,103.381],[29.794,103.333],[29.772,103.316],[29.694,103.296],[29.678,103.304],[29.673,103.337],[29.699,103.353],[29.662,103.362],[29.652,103.337],[29.634,103.339],[29.6,103.299],[29.596,103.268],[29.574,103.27],[29.557,103.256],[29.532,103.271],[29.511,103.26],[29.507,103.294],[29.486,103.278],[29.474,103.186],[29.43,103.18],[29.426,103.158],[29.44,103.127],[29.426,103.09],[29.446,103.055],[29.448,103.015],[29.418,102.984],[29.398,102.975],[29.368,102.999],[29.321,102.98],[29.287,103.004],[29.28,103.032],[29.251,103.02],[29.251,102.963],[29.222,102.975],[29.19,102.945],[29.127,102.929],[29.065,102.97],[29.022,102.909],[28.92,102.946],[28.896,102.928],[28.861,102.942],[28.802,102.925],[28.766,102.944],[28.74,102.938],[28.681,102.963],[28.666,103.032],[28.689,103.066],[28.737,103.071],[28.772,103.107],[28.812,103.113],[28.829,103.154],[28.828,103.19],[28.804,103.225],[28.814,103.239],[28.806,103.271],[28.743,103.335],[28.722,103.334],[28.702,103.311],[28.613,103.273],[28.593,103.243],[28.55,103.247],[28.522,103.3],[28.443,103.34],[28.421,103.388],[28.453,103.433],[28.477,103.442],[28.5,103.439],[28.512,103.422],[28.532,103.43],[28.56,103.504],[28.612,103.531],[28.615,103.586],[28.597,103.614],[28.613,103.615],[28.635,103.686],[28.688,103.723],[28.718,103.725],[28.747,103.702],[28.764,103.746],[28.799,103.769],[28.816,103.761],[28.845,103.83],[28.764,103.938],[28.788,103.956],[28.792,103.98],[28.853,104.003],[28.844,104.025],[28.885,104.03],[28.914,104.085],[28.965,104.062],[28.951,104.107],[28.964,104.123],[29.071,104.142],[29.13,104.175],[29.15,104.168],[29.164,104.194],[29.196,104.177]]]},{"n":"南充市","c":[31.195,106.208],"r":[[[31.251,106.965],[31.265,106.946],[31.291,106.964],[31.289,106.944],[31.309,106.934],[31.329,106.947],[31.377,106.918],[31.401,106.865],[31.421,106.883],[31.457,106.846],[31.503,106.842],[31.515,106.815],[31.548,106.821],[31.531,106.787],[31.538,106.766],[31.567,106.769],[31.563,106.722],[31.572,106.719],[31.561,106.694],[31.591,106.648],[31.567,106.632],[31.545,106.645],[31.511,106.626],[31.507,106.608],[31.518,106.567],[31.546,106.566],[31.572,106.537],[31.567,106.492],[31.585,106.484],[31.586,106.461],[31.633,106.457],[31.656,106.439],[31.657,106.413],[31.681,106.4],[31.697,106.366],[31.733,106.379],[31.726,106.405],[31.755,106.408],[31.755,106.425],[31.846,106.361],[31.848,106.336],[31.807,106.292],[31.811,106.27],[31.774,106.262],[31.782,106.248],[31.771,106.211],[31.786,106.195],[31.819,106.199],[31.807,106.154],[31.829,106.13],[31.791,106.111],[31.792,106.124],[31.767,106.129],[31.708,106.068],[31.697,106.078],[31.685,106.007],[31.662,105.977],[31.672,105.958],[31.665,105.925],[31.649,105.93],[31.626,105.911],[31.648,105.882],[31.631,105.886],[31.615,105.865],[31.651,105.838],[31.667,105.847],[31.668,105.818],[31.735,105.769],[31.719,105.749],[31.727,105.726],[31.664,105.724],[31.65,105.699],[31.609,105.685],[31.602,105.658],[31.614,105.654],[31.601,105.633],[31.588,105.64],[31.584,105.622],[31.554,105.618],[31.552,105.608],[31.581,105.599],[31.566,105.579],[31.574,105.498],[31.551,105.495],[31.527,105.459],[31.499,105.463],[31.481,105.442],[31.475,105.458],[31.486,105.471],[31.455,105.502],[31.424,105.481],[31.391,105.524],[31.403,105.569],[31.382,105.573],[31.407,105.621],[31.395,105.642],[31.371,105.642],[31.346,105.63],[31.34,105.606],[31.3,105.594],[31.289,105.599],[31.296,105.617],[31.284,105.638],[31.258,105.648],[31.249,105.675],[31.172,105.674],[31.169,105.707],[31.111,105.726],[31.097,105.712],[31.084,105.722],[31.071,105.709],[31.039,105.714],[31.016,105.687],[31.017,105.663],[31,105.658],[30.991,105.614],[30.948,105.643],[30.942,105.66],[30.919,105.659],[30.934,105.692],[30.91,105.706],[30.906,105.732],[30.879,105.745],[30.877,105.731],[30.801,105.797],[30.785,105.782],[30.651,105.814],[30.625,105.809],[30.622,105.823],[30.603,105.824],[30.566,105.854],[30.562,105.871],[30.547,105.877],[30.492,105.847],[30.485,105.86],[30.496,105.884],[30.459,105.885],[30.467,105.918],[30.481,105.911],[30.494,105.927],[30.509,105.916],[30.517,105.934],[30.501,105.946],[30.514,105.954],[30.477,105.971],[30.488,105.981],[30.482,106.025],[30.518,106.039],[30.492,106.067],[30.503,106.113],[30.544,106.123],[30.598,106.158],[30.596,106.18],[30.613,106.192],[30.648,106.167],[30.678,106.218],[30.695,106.226],[30.687,106.238],[30.707,106.238],[30.705,106.217],[30.723,106.208],[30.705,106.287],[30.686,106.3],[30.722,106.355],[30.713,106.367],[30.697,106.364],[30.68,106.389],[30.696,106.404],[30.693,106.423],[30.753,106.448],[30.788,106.488],[30.785,106.508],[30.763,106.506],[30.732,106.529],[30.743,106.543],[30.74,106.588],[30.757,106.584],[30.767,106.618],[30.789,106.626],[30.828,106.617],[30.821,106.63],[30.839,106.675],[30.867,106.676],[30.884,106.689],[30.91,106.666],[30.923,106.679],[30.916,106.707],[30.947,106.723],[30.951,106.74],[30.974,106.732],[30.972,106.785],[30.996,106.787],[30.994,106.803],[31.012,106.82],[31.053,106.831],[31.117,106.935],[31.134,106.932],[31.161,106.951],[31.176,106.938],[31.207,106.94],[31.251,106.965]],[[30.494,105.927],[30.481,105.911],[30.467,105.918],[30.494,105.949],[30.494,105.927]]]},{"n":"眉山市","c":[29.925,103.755],"r":[[[29.398,102.975],[29.448,103.015],[29.446,103.055],[29.426,103.09],[29.44,103.127],[29.426,103.158],[29.43,103.18],[29.474,103.186],[29.484,103.204],[29.486,103.278],[29.507,103.294],[29.511,103.26],[29.532,103.271],[29.557,103.256],[29.574,103.27],[29.596,103.268],[29.6,103.299],[29.634,103.339],[29.652,103.337],[29.662,103.362],[29.699,103.353],[29.673,103.337],[29.678,103.304],[29.694,103.296],[29.772,103.316],[29.794,103.333],[29.793,103.381],[29.805,103.394],[29.775,103.417],[29.771,103.439],[29.821,103.433],[29.815,103.486],[29.843,103.518],[29.858,103.517],[29.861,103.534],[29.879,103.514],[29.868,103.558],[29.881,103.585],[29.895,103.572],[29.902,103.59],[29.919,103.59],[29.909,103.608],[29.928,103.648],[29.92,103.678],[29.904,103.677],[29.899,103.693],[29.849,103.729],[29.816,103.729],[29.79,103.747],[29.759,103.688],[29.737,103.706],[29.714,103.705],[29.72,103.755],[29.707,103.765],[29.731,103.842],[29.747,103.856],[29.742,103.894],[29.776,103.913],[29.783,103.903],[29.805,103.935],[29.826,103.928],[29.828,103.962],[29.842,103.951],[29.87,104.004],[29.868,104.05],[29.847,104.056],[29.831,104.044],[29.814,104.089],[29.778,104.063],[29.744,104.089],[29.717,104.126],[29.705,104.191],[29.686,104.187],[29.666,104.204],[29.676,104.228],[29.643,104.24],[29.632,104.27],[29.71,104.321],[29.702,104.35],[29.722,104.337],[29.748,104.398],[29.732,104.416],[29.734,104.442],[29.785,104.47],[29.807,104.503],[29.811,104.477],[29.897,104.503],[29.935,104.473],[29.942,104.482],[29.951,104.462],[29.989,104.479],[30.001,104.455],[30.05,104.464],[30.047,104.48],[30.067,104.467],[30.087,104.482],[30.087,104.461],[30.101,104.45],[30.09,104.428],[30.162,104.386],[30.174,104.358],[30.186,104.365],[30.218,104.273],[30.242,104.265],[30.256,104.231],[30.267,104.243],[30.28,104.232],[30.314,104.232],[30.317,104.202],[30.33,104.193],[30.246,104.151],[30.227,104.117],[30.27,104.047],[30.265,103.998],[30.317,103.966],[30.313,103.954],[30.346,103.936],[30.358,103.942],[30.354,103.914],[30.331,103.91],[30.329,103.888],[30.348,103.874],[30.346,103.795],[30.308,103.751],[30.305,103.728],[30.286,103.737],[30.27,103.682],[30.246,103.693],[30.229,103.648],[30.2,103.65],[30.215,103.628],[30.195,103.617],[30.204,103.597],[30.178,103.534],[30.161,103.544],[30.104,103.486],[30.131,103.475],[30.132,103.451],[30.114,103.468],[30.096,103.462],[30.097,103.451],[30.119,103.44],[30.096,103.378],[30.082,103.372],[30.098,103.35],[30.075,103.34],[30.072,103.313],[30.088,103.302],[30.04,103.253],[29.971,103.226],[29.966,103.191],[29.944,103.196],[29.916,103.11],[29.887,103.094],[29.864,103.125],[29.77,103.165],[29.761,103.143],[29.738,103.163],[29.731,103.144],[29.713,103.154],[29.703,103.141],[29.672,103.15],[29.672,103.128],[29.694,103.099],[29.676,103.052],[29.7,103.045],[29.726,103.008],[29.708,102.996],[29.722,102.962],[29.711,102.929],[29.677,102.938],[29.553,102.914],[29.53,102.87],[29.466,102.823],[29.416,102.879],[29.398,102.975]],[[29.861,103.534],[29.858,103.517],[29.843,103.518],[29.842,103.533],[29.861,103.534]]]},{"n":"宜宾市","c":[28.572,104.638],"r":[[[28.525,103.782],[28.534,103.801],[28.562,103.801],[28.585,103.837],[28.622,103.835],[28.667,103.851],[28.653,103.874],[28.626,103.875],[28.623,103.937],[28.603,103.942],[28.628,104.06],[28.603,104.096],[28.637,104.125],[28.636,104.231],[28.661,104.241],[28.616,104.315],[28.649,104.374],[28.627,104.425],[28.598,104.417],[28.586,104.368],[28.556,104.357],[28.559,104.33],[28.539,104.319],[28.528,104.248],[28.466,104.27],[28.453,104.258],[28.42,104.268],[28.409,104.254],[28.347,104.278],[28.328,104.302],[28.315,104.29],[28.307,104.314],[28.339,104.358],[28.33,104.385],[28.27,104.408],[28.27,104.449],[28.259,104.444],[28.242,104.462],[28.214,104.446],[28.203,104.402],[28.177,104.404],[28.174,104.452],[28.116,104.451],[28.088,104.399],[28.064,104.395],[28.052,104.377],[28.058,104.341],[28.044,104.299],[28.018,104.356],[27.952,104.401],[27.896,104.498],[27.882,104.503],[27.887,104.537],[27.852,104.559],[27.842,104.581],[27.858,104.608],[27.851,104.634],[27.882,104.679],[27.902,104.744],[27.885,104.76],[27.901,104.795],[27.906,104.873],[27.933,104.891],[27.942,104.921],[27.96,104.903],[27.985,104.929],[27.981,104.947],[27.995,104.947],[28.02,104.975],[28.063,104.981],[28.067,105.011],[28.098,105.059],[28.084,105.077],[28.067,105.177],[28.073,105.204],[28.134,105.275],[28.141,105.35],[28.153,105.358],[28.257,105.333],[28.313,105.337],[28.369,105.288],[28.386,105.323],[28.428,105.32],[28.436,105.294],[28.449,105.295],[28.446,105.191],[28.493,105.234],[28.523,105.237],[28.548,105.203],[28.569,105.208],[28.608,105.172],[28.65,105.168],[28.674,105.201],[28.696,105.211],[28.71,105.204],[28.716,105.219],[28.739,105.217],[28.747,105.204],[28.775,105.241],[28.818,105.215],[28.897,105.204],[28.942,105.145],[28.936,105.074],[28.99,105.005],[28.992,104.986],[29.016,104.97],[29.021,104.945],[29.059,104.942],[29.051,104.881],[29.024,104.88],[29.02,104.862],[29.003,104.858],[29.002,104.82],[28.991,104.812],[29,104.797],[28.997,104.72],[29.045,104.705],[29.079,104.737],[29.106,104.73],[29.122,104.715],[29.118,104.698],[29.156,104.68],[29.199,104.692],[29.207,104.624],[29.143,104.541],[29.156,104.509],[29.222,104.461],[29.221,104.435],[29.239,104.443],[29.241,104.323],[29.261,104.249],[29.232,104.265],[29.212,104.256],[29.206,104.233],[29.236,104.191],[29.221,104.196],[29.184,104.175],[29.164,104.194],[29.15,104.168],[29.13,104.175],[29.071,104.142],[28.964,104.123],[28.951,104.107],[28.965,104.062],[28.914,104.085],[28.885,104.03],[28.844,104.025],[28.853,104.003],[28.792,103.98],[28.788,103.956],[28.764,103.938],[28.845,103.83],[28.816,103.761],[28.799,103.769],[28.764,103.746],[28.747,103.702],[28.718,103.725],[28.688,103.723],[28.635,103.686],[28.613,103.615],[28.597,103.614],[28.605,103.64],[28.595,103.665],[28.563,103.689],[28.553,103.713],[28.498,103.685],[28.472,103.725],[28.512,103.74],[28.525,103.782]]]},{"n":"广安市","c":[30.424,106.666],"r":[[[30.084,106.976],[30.037,107.021],[30.035,107.043],[30.055,107.042],[30.043,107.059],[30.064,107.084],[30.081,107.074],[30.094,107.08],[30.09,107.103],[30.114,107.107],[30.122,107.131],[30.264,107.256],[30.305,107.273],[30.325,107.253],[30.344,107.252],[30.346,107.221],[30.37,107.229],[30.41,107.207],[30.424,107.225],[30.437,107.22],[30.432,107.192],[30.45,107.186],[30.459,107.164],[30.501,107.214],[30.536,107.185],[30.516,107.189],[30.503,107.174],[30.526,107.112],[30.506,107.095],[30.47,107.143],[30.472,107.123],[30.486,107.118],[30.486,107.082],[30.514,107.076],[30.521,107.011],[30.499,106.983],[30.534,106.975],[30.547,106.985],[30.549,107.018],[30.643,107.043],[30.636,106.998],[30.646,106.969],[30.636,106.949],[30.664,106.904],[30.698,106.89],[30.702,106.905],[30.685,106.924],[30.707,106.95],[30.716,106.884],[30.734,106.88],[30.738,106.84],[30.757,106.831],[30.808,106.739],[30.833,106.73],[30.829,106.685],[30.839,106.675],[30.821,106.63],[30.828,106.617],[30.789,106.626],[30.767,106.618],[30.757,106.584],[30.74,106.588],[30.743,106.543],[30.732,106.529],[30.763,106.506],[30.785,106.508],[30.788,106.488],[30.753,106.448],[30.693,106.423],[30.696,106.404],[30.68,106.389],[30.697,106.364],[30.713,106.367],[30.722,106.355],[30.686,106.3],[30.705,106.287],[30.723,106.208],[30.705,106.217],[30.707,106.238],[30.687,106.238],[30.695,106.226],[30.678,106.218],[30.648,106.167],[30.613,106.192],[30.596,106.18],[30.598,106.158],[30.544,106.123],[30.503,106.113],[30.492,106.067],[30.518,106.039],[30.482,106.025],[30.488,105.981],[30.456,105.971],[30.453,105.95],[30.425,105.964],[30.428,105.979],[30.413,105.99],[30.376,106.001],[30.372,106.032],[30.334,106.073],[30.346,106.089],[30.323,106.088],[30.302,106.132],[30.324,106.132],[30.305,106.171],[30.233,106.18],[30.228,106.201],[30.216,106.192],[30.203,106.213],[30.213,106.232],[30.197,106.261],[30.21,106.264],[30.196,106.278],[30.206,106.296],[30.239,106.301],[30.226,106.335],[30.245,106.349],[30.242,106.403],[30.254,106.428],[30.276,106.408],[30.277,106.435],[30.292,106.429],[30.297,106.545],[30.315,106.56],[30.293,106.611],[30.266,106.635],[30.247,106.642],[30.228,106.611],[30.227,106.624],[30.187,106.632],[30.157,106.678],[30.122,106.673],[30.118,106.703],[30.074,106.7],[30.057,106.726],[30.027,106.732],[30.017,106.785],[30.049,106.842],[30.028,106.861],[30.026,106.914],[30.04,106.949],[30.084,106.976]],[[30.323,107.255],[30.305,107.273],[30.355,107.305],[30.357,107.276],[30.322,107.272],[30.323,107.255]],[[30.348,107.242],[30.339,107.242],[30.344,107.252],[30.348,107.242]]]},{"n":"达州市","c":[31.367,107.651],"r":[[[30.355,107.305],[30.387,107.339],[30.456,107.36],[30.522,107.409],[30.516,107.42],[30.535,107.443],[30.548,107.428],[30.642,107.515],[30.682,107.457],[30.705,107.459],[30.741,107.424],[30.747,107.439],[30.779,107.448],[30.774,107.466],[30.8,107.478],[30.809,107.498],[30.837,107.481],[30.855,107.514],[30.839,107.528],[30.848,107.578],[30.838,107.616],[30.818,107.631],[30.888,107.717],[30.862,107.76],[30.846,107.752],[30.817,107.764],[30.819,107.788],[30.797,107.819],[30.793,107.852],[30.873,107.955],[30.903,107.992],[30.923,107.945],[30.953,107.936],[30.989,107.944],[30.983,107.981],[31.025,108.004],[31.041,108.053],[31.054,108.059],[31.062,108.029],[31.108,108.009],[31.188,108.086],[31.206,108.089],[31.232,108.076],[31.219,108.04],[31.245,108.019],[31.266,108.092],[31.338,108.186],[31.371,108.154],[31.397,108.206],[31.411,108.216],[31.436,108.211],[31.449,108.224],[31.465,108.223],[31.468,108.193],[31.491,108.19],[31.506,108.227],[31.502,108.323],[31.512,108.344],[31.539,108.34],[31.543,108.381],[31.561,108.392],[31.57,108.378],[31.604,108.403],[31.634,108.443],[31.622,108.468],[31.639,108.472],[31.667,108.546],[31.694,108.515],[31.702,108.525],[31.733,108.506],[31.758,108.535],[31.781,108.462],[31.791,108.454],[31.808,108.465],[31.829,108.392],[31.854,108.386],[31.864,108.341],[31.906,108.308],[31.918,108.283],[31.953,108.28],[31.967,108.259],[31.985,108.27],[31.979,108.282],[31.997,108.307],[31.972,108.351],[31.987,108.369],[32.019,108.329],[32.036,108.362],[32.048,108.364],[32.064,108.344],[32.077,108.374],[32.061,108.43],[32.074,108.45],[32.09,108.453],[32.173,108.369],[32.196,108.406],[32.182,108.479],[32.201,108.51],[32.246,108.507],[32.251,108.484],[32.271,108.472],[32.252,108.415],[32.264,108.391],[32.254,108.348],[32.233,108.332],[32.232,108.312],[32.274,108.249],[32.257,108.212],[32.222,108.18],[32.239,108.157],[32.219,108.142],[32.23,108.066],[32.212,108.019],[32.176,108.023],[32.147,107.996],[32.146,107.979],[32.197,107.925],[32.214,107.89],[32.202,107.868],[32.223,107.836],[32.338,107.755],[32.329,107.717],[32.318,107.704],[32.282,107.705],[32.251,107.679],[32.219,107.69],[32.2,107.631],[32.152,107.628],[32.139,107.641],[32.141,107.681],[32.102,107.743],[32.07,107.764],[32.006,107.676],[32.014,107.622],[32,107.585],[31.981,107.569],[31.963,107.584],[31.926,107.515],[31.897,107.551],[31.877,107.533],[31.866,107.496],[31.834,107.572],[31.769,107.555],[31.761,107.534],[31.738,107.539],[31.729,107.492],[31.698,107.502],[31.685,107.533],[31.597,107.49],[31.583,107.454],[31.592,107.445],[31.573,107.43],[31.564,107.389],[31.541,107.361],[31.549,107.354],[31.531,107.331],[31.493,107.323],[31.491,107.286],[31.454,107.273],[31.445,107.259],[31.466,107.238],[31.435,107.225],[31.428,107.174],[31.38,107.145],[31.357,107.15],[31.334,107.12],[31.335,107.102],[31.373,107.075],[31.347,107.046],[31.327,107.055],[31.322,107.036],[31.295,107.039],[31.304,107.019],[31.269,107.004],[31.249,106.983],[31.251,106.965],[31.207,106.94],[31.176,106.938],[31.161,106.951],[31.134,106.932],[31.117,106.935],[31.053,106.831],[31.012,106.82],[30.994,106.803],[30.996,106.787],[30.972,106.785],[30.974,106.732],[30.951,106.74],[30.947,106.723],[30.916,106.707],[30.923,106.679],[30.91,106.666],[30.884,106.689],[30.867,106.676],[30.829,106.685],[30.833,106.73],[30.808,106.739],[30.757,106.831],[30.738,106.84],[30.734,106.88],[30.716,106.884],[30.707,106.95],[30.685,106.924],[30.702,106.905],[30.698,106.89],[30.664,106.904],[30.636,106.949],[30.646,106.969],[30.636,106.998],[30.643,107.043],[30.549,107.018],[30.547,106.985],[30.534,106.975],[30.499,106.983],[30.521,107.011],[30.514,107.076],[30.486,107.082],[30.486,107.118],[30.472,107.123],[30.47,107.143],[30.506,107.095],[30.526,107.112],[30.503,107.174],[30.516,107.189],[30.536,107.185],[30.501,107.214],[30.459,107.164],[30.45,107.186],[30.432,107.192],[30.437,107.22],[30.414,107.228],[30.391,107.209],[30.37,107.229],[30.346,107.221],[30.351,107.24],[30.322,107.272],[30.371,107.274],[30.355,107.305]],[[30.421,107.227],[30.41,107.207],[30.406,107.218],[30.421,107.227]],[[30.372,107.277],[30.357,107.276],[30.363,107.288],[30.372,107.277]]]},{"n":"雅安市","c":[29.914,102.665],"r":[[[30.095,103.395],[30.137,103.361],[30.148,103.372],[30.168,103.361],[30.228,103.37],[30.235,103.32],[30.26,103.314],[30.264,103.282],[30.243,103.243],[30.213,103.233],[30.209,103.216],[30.232,103.212],[30.248,103.184],[30.207,103.147],[30.22,103.077],[30.303,103.062],[30.367,103.128],[30.38,103.116],[30.451,103.126],[30.471,103.142],[30.473,103.162],[30.512,103.186],[30.525,103.181],[30.53,103.158],[30.556,103.166],[30.586,103.148],[30.594,103.127],[30.655,103.132],[30.716,103.069],[30.704,103.031],[30.719,103.034],[30.746,103.005],[30.778,102.993],[30.765,102.898],[30.798,102.864],[30.866,102.889],[30.901,102.89],[30.923,102.875],[30.937,102.852],[30.936,102.802],[30.916,102.754],[30.915,102.708],[30.858,102.68],[30.848,102.591],[30.769,102.469],[30.714,102.494],[30.64,102.472],[30.597,102.431],[30.524,102.418],[30.355,102.433],[30.234,102.402],[30.188,102.329],[30.129,102.294],[30.101,102.295],[30.077,102.268],[30.017,102.275],[29.955,102.303],[29.882,102.271],[29.838,102.291],[29.825,102.323],[29.8,102.326],[29.789,102.344],[29.763,102.353],[29.737,102.329],[29.72,102.336],[29.684,102.296],[29.604,102.277],[29.575,102.31],[29.533,102.314],[29.457,102.203],[29.467,102.176],[29.513,102.179],[29.533,102.166],[29.532,102.145],[29.504,102.146],[29.51,102.133],[29.496,102.091],[29.49,101.974],[29.501,101.936],[29.438,101.952],[29.422,101.984],[29.344,101.95],[29.315,101.96],[29.299,101.984],[29.298,102.046],[29.272,102.096],[29.239,102.123],[29.222,102.12],[29.178,102.056],[29.173,102.089],[29.185,102.11],[29.176,102.13],[29.13,102.161],[29.103,102.152],[29.073,102.168],[29.045,102.156],[29.025,102.189],[29.013,102.181],[28.899,102.254],[28.9,102.291],[28.855,102.352],[28.845,102.43],[28.92,102.481],[28.984,102.472],[29.036,102.525],[29.094,102.515],[29.112,102.522],[29.117,102.548],[29.16,102.563],[29.16,102.595],[29.192,102.591],[29.211,102.636],[29.178,102.649],[29.162,102.673],[29.16,102.772],[29.173,102.779],[29.187,102.767],[29.237,102.781],[29.25,102.805],[29.242,102.833],[29.208,102.837],[29.206,102.88],[29.222,102.905],[29.265,102.912],[29.303,102.94],[29.287,103.004],[29.321,102.98],[29.368,102.999],[29.398,102.975],[29.416,102.879],[29.466,102.823],[29.53,102.87],[29.553,102.914],[29.677,102.938],[29.711,102.929],[29.722,102.962],[29.708,102.996],[29.726,103.008],[29.7,103.045],[29.676,103.052],[29.694,103.099],[29.672,103.128],[29.672,103.15],[29.703,103.141],[29.713,103.154],[29.731,103.144],[29.738,103.163],[29.761,103.143],[29.77,103.165],[29.864,103.125],[29.887,103.094],[29.916,103.11],[29.944,103.196],[29.966,103.191],[29.971,103.226],[30.04,103.253],[30.088,103.302],[30.072,103.313],[30.075,103.34],[30.098,103.35],[30.082,103.372],[30.096,103.378],[30.095,103.395]]]},{"n":"巴中市","c":[32.017,107.042],"r":[[[31.251,106.965],[31.249,106.983],[31.304,107.019],[31.295,107.039],[31.322,107.036],[31.327,107.055],[31.347,107.046],[31.373,107.075],[31.335,107.102],[31.334,107.12],[31.357,107.15],[31.38,107.145],[31.428,107.174],[31.435,107.225],[31.466,107.238],[31.445,107.259],[31.454,107.273],[31.491,107.286],[31.493,107.323],[31.531,107.331],[31.549,107.354],[31.541,107.361],[31.564,107.389],[31.573,107.43],[31.592,107.445],[31.583,107.454],[31.597,107.49],[31.685,107.533],[31.698,107.502],[31.729,107.492],[31.738,107.539],[31.761,107.534],[31.769,107.555],[31.834,107.572],[31.866,107.496],[31.877,107.533],[31.897,107.551],[31.926,107.515],[31.963,107.584],[31.981,107.569],[32,107.585],[32.014,107.622],[32.006,107.676],[32.07,107.764],[32.102,107.743],[32.141,107.681],[32.139,107.641],[32.152,107.628],[32.2,107.631],[32.219,107.69],[32.251,107.679],[32.282,107.705],[32.318,107.704],[32.329,107.717],[32.398,107.68],[32.414,107.648],[32.411,107.603],[32.384,107.533],[32.386,107.512],[32.425,107.49],[32.418,107.457],[32.458,107.458],[32.466,107.439],[32.501,107.429],[32.53,107.436],[32.539,107.406],[32.539,107.378],[32.506,107.357],[32.49,107.314],[32.403,107.264],[32.432,107.21],[32.468,107.19],[32.482,107.127],[32.542,107.08],[32.601,107.108],[32.649,107.099],[32.686,107.06],[32.709,107.067],[32.722,107.013],[32.704,106.913],[32.721,106.903],[32.726,106.873],[32.706,106.821],[32.713,106.793],[32.701,106.782],[32.737,106.779],[32.739,106.733],[32.691,106.663],[32.687,106.64],[32.637,106.645],[32.622,106.658],[32.504,106.649],[32.486,106.675],[32.454,106.69],[32.348,106.689],[32.337,106.726],[32.315,106.738],[32.323,106.745],[32.297,106.776],[32.285,106.755],[32.295,106.717],[32.269,106.718],[32.273,106.675],[32.25,106.666],[32.228,106.565],[32.176,106.557],[32.128,106.568],[32.098,106.535],[32.083,106.559],[32.082,106.534],[32.069,106.518],[32.05,106.52],[32.049,106.501],[32.025,106.509],[31.977,106.482],[31.977,106.445],[31.942,106.464],[31.943,106.446],[31.902,106.409],[31.89,106.425],[31.874,106.406],[31.832,106.416],[31.806,106.396],[31.755,106.425],[31.755,106.408],[31.726,106.405],[31.733,106.379],[31.697,106.366],[31.681,106.4],[31.657,106.413],[31.656,106.439],[31.633,106.457],[31.586,106.461],[31.585,106.484],[31.567,106.492],[31.572,106.537],[31.546,106.566],[31.518,106.567],[31.511,106.626],[31.545,106.645],[31.567,106.632],[31.591,106.648],[31.561,106.694],[31.572,106.719],[31.563,106.722],[31.567,106.769],[31.538,106.766],[31.531,106.787],[31.548,106.821],[31.515,106.815],[31.503,106.842],[31.457,106.846],[31.421,106.883],[31.401,106.865],[31.377,106.918],[31.329,106.947],[31.309,106.934],[31.289,106.944],[31.291,106.964],[31.265,106.946],[31.251,106.965]]]},{"n":"资阳市","c":[30.098,105.118],"r":[[[29.902,104.9],[29.936,104.927],[29.941,104.904],[29.947,104.924],[29.977,104.933],[29.993,104.952],[29.977,105.021],[29.948,105.049],[29.944,105.075],[29.923,105.064],[29.905,105.097],[29.885,105.101],[29.883,105.081],[29.849,105.095],[29.831,105.126],[29.847,105.176],[29.845,105.217],[29.818,105.238],[29.804,105.234],[29.796,105.253],[29.798,105.289],[29.821,105.298],[29.812,105.354],[29.834,105.36],[29.797,105.383],[29.789,105.405],[29.747,105.393],[29.721,105.417],[29.688,105.424],[29.675,105.476],[29.716,105.48],[29.695,105.539],[29.708,105.53],[29.722,105.55],[29.738,105.549],[29.728,105.567],[29.819,105.583],[29.817,105.605],[29.837,105.611],[29.841,105.662],[29.854,105.678],[29.841,105.709],[29.861,105.736],[29.891,105.739],[29.894,105.717],[29.925,105.703],[29.957,105.731],[29.976,105.723],[30.019,105.754],[30.034,105.746],[30.027,105.728],[30.041,105.722],[30.039,105.687],[30.071,105.675],[30.076,105.639],[30.101,105.642],[30.109,105.598],[30.134,105.57],[30.157,105.597],[30.152,105.537],[30.187,105.557],[30.213,105.547],[30.22,105.529],[30.203,105.521],[30.223,105.482],[30.239,105.481],[30.266,105.445],[30.26,105.426],[30.296,105.411],[30.278,105.369],[30.308,105.358],[30.28,105.258],[30.287,105.222],[30.306,105.219],[30.323,105.157],[30.342,105.151],[30.341,105.126],[30.396,105.097],[30.403,105.074],[30.426,105.09],[30.433,105.069],[30.442,105.09],[30.46,105.09],[30.482,105.077],[30.495,105.084],[30.523,105.06],[30.536,105.067],[30.546,105.023],[30.53,105.025],[30.529,104.984],[30.612,104.953],[30.601,104.93],[30.617,104.932],[30.626,104.911],[30.609,104.886],[30.618,104.879],[30.611,104.859],[30.582,104.859],[30.542,104.893],[30.513,104.876],[30.437,104.875],[30.394,104.882],[30.382,104.896],[30.361,104.881],[30.364,104.861],[30.347,104.855],[30.362,104.837],[30.339,104.85],[30.307,104.849],[30.297,104.807],[30.279,104.795],[30.302,104.775],[30.29,104.739],[30.308,104.724],[30.302,104.704],[30.275,104.692],[30.283,104.644],[30.268,104.638],[30.24,104.653],[30.244,104.6],[30.22,104.6],[30.197,104.569],[30.182,104.484],[30.156,104.485],[30.157,104.468],[30.133,104.449],[30.121,104.458],[30.108,104.437],[30.087,104.461],[30.087,104.482],[30.067,104.467],[30.047,104.48],[30.05,104.464],[30.027,104.469],[30.023,104.499],[30.036,104.498],[30.027,104.524],[29.999,104.533],[30.008,104.546],[29.996,104.568],[29.951,104.578],[29.933,104.607],[29.957,104.644],[29.906,104.674],[29.902,104.687],[29.92,104.69],[29.933,104.709],[29.944,104.673],[29.964,104.685],[29.949,104.731],[29.909,104.748],[29.88,104.798],[29.861,104.781],[29.849,104.792],[29.853,104.809],[29.867,104.793],[29.875,104.805],[29.867,104.839],[29.885,104.828],[29.891,104.863],[29.913,104.879],[29.902,104.9]]]},{"n":"阿坝藏族羌族自治州","c":[32.409,102.613],"r":[[[32.524,100.668],[32.504,100.622],[32.479,100.634],[32.443,100.613],[32.394,100.537],[32.327,100.532],[32.304,100.554],[32.282,100.552],[32.269,100.589],[32.261,100.58],[32.232,100.599],[32.233,100.639],[32.219,100.666],[32.188,100.682],[32.183,100.72],[32.163,100.727],[32.156,100.692],[32.133,100.699],[32.1,100.731],[32.087,100.763],[32.049,100.785],[32.05,100.8],[32.01,100.785],[31.992,100.804],[31.99,100.829],[31.958,100.869],[31.987,100.95],[31.979,100.99],[31.949,101.012],[31.931,100.992],[31.865,100.993],[31.861,100.953],[31.825,100.939],[31.805,100.917],[31.786,100.862],[31.759,100.853],[31.738,100.869],[31.751,100.933],[31.718,100.964],[31.682,100.969],[31.641,101.025],[31.628,101.063],[31.606,101.05],[31.576,101.075],[31.549,101.06],[31.494,101.079],[31.487,101.099],[31.469,101.107],[31.495,101.144],[31.506,101.203],[31.535,101.222],[31.518,101.242],[31.464,101.264],[31.399,101.245],[31.379,101.257],[31.376,101.285],[31.359,101.301],[31.385,101.328],[31.369,101.337],[31.371,101.355],[31.399,101.39],[31.397,101.406],[31.437,101.416],[31.435,101.45],[31.41,101.464],[31.39,101.456],[31.372,101.43],[31.346,101.427],[31.294,101.453],[31.331,101.469],[31.348,101.447],[31.354,101.476],[31.368,101.482],[31.379,101.546],[31.341,101.573],[31.382,101.61],[31.385,101.628],[31.353,101.685],[31.289,101.715],[31.31,101.765],[31.282,101.764],[31.282,101.837],[31.266,101.858],[31.201,101.864],[31.19,101.879],[31.161,101.885],[31.146,101.911],[31.169,101.93],[31.177,101.974],[31.156,101.985],[31.145,102.014],[31.073,102.034],[31.084,102.078],[31.141,102.154],[31.107,102.173],[31.09,102.163],[30.996,102.164],[30.95,102.194],[30.934,102.189],[30.91,102.201],[30.896,102.171],[30.898,102.113],[30.871,102.065],[30.792,102.066],[30.763,102.04],[30.741,102.07],[30.707,102.039],[30.699,102.055],[30.662,102.048],[30.669,102.066],[30.658,102.105],[30.638,102.115],[30.595,102.177],[30.628,102.185],[30.637,102.228],[30.621,102.247],[30.636,102.273],[30.654,102.274],[30.676,102.296],[30.678,102.317],[30.706,102.348],[30.712,102.392],[30.682,102.447],[30.693,102.477],[30.769,102.469],[30.79,102.494],[30.795,102.521],[30.848,102.591],[30.858,102.68],[30.915,102.708],[30.916,102.754],[30.936,102.802],[30.937,102.852],[30.901,102.89],[30.866,102.889],[30.798,102.864],[30.765,102.898],[30.77,102.963],[30.813,103.084],[30.793,103.124],[30.842,103.166],[30.842,103.258],[30.811,103.305],[30.825,103.338],[30.851,103.355],[30.865,103.409],[30.893,103.451],[30.942,103.465],[30.972,103.516],[31.03,103.517],[31.041,103.505],[31.101,103.526],[31.191,103.583],[31.338,103.57],[31.355,103.669],[31.391,103.701],[31.399,103.74],[31.419,103.75],[31.43,103.803],[31.472,103.796],[31.538,103.858],[31.513,103.898],[31.538,103.915],[31.564,103.907],[31.64,103.928],[31.682,103.989],[31.679,104.016],[31.698,104.041],[31.688,104.086],[31.71,104.103],[31.732,104.171],[31.78,104.17],[31.816,104.152],[31.839,104.08],[31.829,104.061],[31.862,104.017],[31.856,103.975],[31.904,103.958],[31.942,103.921],[31.918,103.877],[31.921,103.846],[31.94,103.818],[31.946,103.764],[31.964,103.755],[31.998,103.758],[32.071,103.825],[32.098,103.812],[32.13,103.827],[32.127,103.855],[32.161,103.851],[32.141,103.975],[32.119,103.995],[32.131,104.049],[32.125,104.101],[32.14,104.129],[32.126,104.153],[32.15,104.142],[32.197,104.182],[32.215,104.222],[32.215,104.257],[32.249,104.248],[32.285,104.209],[32.298,104.211],[32.309,104.182],[32.25,104.162],[32.223,104.131],[32.249,104.067],[32.249,104.034],[32.306,103.982],[32.315,103.921],[32.365,103.889],[32.433,103.915],[32.511,103.907],[32.584,103.845],[32.614,103.853],[32.639,103.89],[32.652,104.036],[32.631,104.066],[32.569,104.084],[32.53,104.129],[32.492,104.132],[32.468,104.095],[32.474,104.144],[32.531,104.175],[32.579,104.168],[32.663,104.183],[32.711,104.156],[32.73,104.13],[32.757,104.147],[32.8,104.121],[32.801,104.108],[32.848,104.101],[32.857,104.079],[32.833,104.036],[32.82,104.032],[32.814,104.005],[32.84,103.971],[32.861,103.995],[32.879,103.994],[32.888,103.958],[32.917,103.953],[32.922,103.965],[33.005,103.974],[33.035,103.986],[33.041,104.013],[33.003,104.069],[33,104.113],[32.878,104.248],[32.891,104.277],[32.939,104.286],[32.952,104.306],[32.94,104.345],[32.953,104.378],[32.994,104.384],[33.011,104.426],[33.024,104.421],[33.035,104.391],[33.028,104.36],[33.038,104.338],[33.087,104.367],[33.099,104.361],[33.107,104.377],[33.305,104.304],[33.314,104.336],[33.301,104.349],[33.297,104.398],[33.311,104.394],[33.327,104.42],[33.345,104.368],[33.333,104.296],[33.393,104.271],[33.405,104.221],[33.429,104.222],[33.473,104.181],[33.547,104.156],[33.576,104.18],[33.612,104.169],[33.663,104.103],[33.685,104.052],[33.67,103.967],[33.682,103.862],[33.659,103.778],[33.693,103.689],[33.686,103.668],[33.699,103.667],[33.7,103.65],[33.712,103.669],[33.721,103.652],[33.709,103.644],[33.722,103.633],[33.7,103.564],[33.671,103.552],[33.679,103.52],[33.74,103.549],[33.749,103.531],[33.767,103.54],[33.807,103.518],[33.802,103.464],[33.751,103.432],[33.743,103.35],[33.774,103.28],[33.802,103.285],[33.814,103.25],[33.795,103.228],[33.807,103.161],[33.819,103.153],[33.901,103.181],[33.924,103.171],[33.942,103.123],[33.968,103.124],[33.999,103.157],[34.037,103.147],[34.04,103.119],[34.067,103.131],[34.066,103.17],[34.08,103.178],[34.113,103.122],[34.129,103.133],[34.162,103.124],[34.182,103.1],[34.195,103.05],[34.185,103.006],[34.205,102.973],[34.241,102.98],[34.3,102.94],[34.312,102.879],[34.302,102.861],[34.271,102.857],[34.275,102.807],[34.258,102.784],[34.236,102.778],[34.237,102.732],[34.198,102.701],[34.193,102.664],[34.178,102.647],[34.166,102.65],[34.167,102.625],[34.148,102.598],[34.113,102.656],[34.085,102.66],[34.08,102.649],[34.1,102.616],[34.101,102.585],[34.074,102.467],[34.087,102.439],[34.018,102.4],[33.971,102.391],[33.97,102.346],[33.982,102.325],[33.972,102.31],[33.994,102.316],[33.978,102.287],[33.99,102.278],[33.976,102.258],[33.982,102.241],[33.964,102.238],[33.983,102.167],[33.965,102.136],[33.862,102.253],[33.825,102.262],[33.789,102.239],[33.782,102.3],[33.755,102.324],[33.723,102.284],[33.71,102.301],[33.735,102.325],[33.721,102.342],[33.669,102.314],[33.607,102.345],[33.575,102.44],[33.543,102.478],[33.53,102.475],[33.531,102.446],[33.504,102.462],[33.484,102.454],[33.45,102.462],[33.453,102.442],[33.405,102.396],[33.409,102.367],[33.394,102.37],[33.41,102.347],[33.398,102.311],[33.411,102.301],[33.417,102.263],[33.396,102.261],[33.389,102.238],[33.351,102.22],[33.333,102.187],[33.32,102.206],[33.248,102.218],[33.223,102.203],[33.234,102.175],[33.274,102.144],[33.286,102.111],[33.205,102.09],[33.19,102.055],[33.2,101.994],[33.187,101.936],[33.156,101.923],[33.132,101.884],[33.103,101.866],[33.12,101.826],[33.189,101.841],[33.215,101.828],[33.229,101.788],[33.263,101.768],[33.288,101.809],[33.271,101.824],[33.292,101.832],[33.314,101.876],[33.382,101.886],[33.406,101.914],[33.426,101.916],[33.443,101.946],[33.45,101.924],[33.473,101.927],[33.48,101.907],[33.519,101.898],[33.542,101.907],[33.579,101.882],[33.602,101.844],[33.555,101.83],[33.556,101.782],[33.545,101.77],[33.454,101.776],[33.434,101.696],[33.382,101.663],[33.325,101.649],[33.297,101.678],[33.299,101.707],[33.269,101.74],[33.213,101.711],[33.202,101.681],[33.185,101.687],[33.163,101.654],[33.137,101.661],[33.102,101.634],[33.227,101.486],[33.225,101.403],[33.207,101.387],[33.158,101.394],[33.154,101.381],[33.237,101.329],[33.262,101.297],[33.27,101.223],[33.255,101.207],[33.27,101.203],[33.27,101.184],[33.237,101.157],[33.224,101.128],[33.187,101.12],[33.189,101.133],[33.169,101.131],[33.144,101.159],[33.132,101.151],[33.102,101.17],[33.084,101.143],[33.057,101.147],[33.041,101.184],[33.014,101.171],[32.984,101.184],[32.99,101.129],[32.91,101.124],[32.894,101.176],[32.856,101.224],[32.838,101.223],[32.828,101.238],[32.726,101.223],[32.687,101.19],[32.662,101.157],[32.661,101.13],[32.637,101.112],[32.672,101.113],[32.672,101.084],[32.683,101.077],[32.628,100.997],[32.621,100.957],[32.601,100.932],[32.633,100.888],[32.655,100.8],[32.641,100.774],[32.664,100.766],[32.651,100.752],[32.678,100.692],[32.671,100.685],[32.65,100.709],[32.617,100.718],[32.624,100.666],[32.547,100.658],[32.524,100.668]]]},{"n":"甘孜藏族自治州","c":[30.979,99.987],"r":[[[28.083,100.062],[28.085,100.072],[28.048,100.1],[27.984,100.202],[27.987,100.226],[27.961,100.256],[28.01,100.303],[28.017,100.349],[28.006,100.418],[28.019,100.427],[28.206,100.368],[28.25,100.373],[28.291,100.414],[28.306,100.416],[28.325,100.39],[28.387,100.421],[28.433,100.416],[28.448,100.44],[28.475,100.45],[28.5,100.491],[28.574,100.53],[28.671,100.524],[28.696,100.472],[28.709,100.472],[28.709,100.509],[28.75,100.563],[28.744,100.595],[28.798,100.58],[28.821,100.587],[28.833,100.564],[28.917,100.543],[28.95,100.521],[28.955,100.609],[29.005,100.658],[29.019,100.65],[28.997,100.705],[29.01,100.779],[28.989,100.798],[28.993,100.82],[29.021,100.846],[29.055,100.832],[29.064,100.773],[29.088,100.772],[29.113,100.837],[29.146,100.883],[29.14,100.916],[29.099,100.922],[29.088,100.936],[29.061,100.929],[29.146,101.05],[29.166,101.057],[29.147,101.097],[29.112,101.118],[29.071,101.116],[29.018,101.156],[29,101.145],[28.947,101.16],[28.941,101.184],[28.905,101.181],[28.891,101.193],[28.836,101.172],[28.789,101.173],[28.755,101.205],[28.653,101.203],[28.673,101.298],[28.666,101.356],[28.629,101.368],[28.646,101.427],[28.625,101.446],[28.627,101.49],[28.589,101.517],[28.599,101.551],[28.538,101.62],[28.509,101.618],[28.492,101.63],[28.475,101.595],[28.505,101.428],[28.521,101.413],[28.472,101.368],[28.462,101.373],[28.49,101.426],[28.472,101.44],[28.411,101.454],[28.404,101.468],[28.319,101.482],[28.315,101.51],[28.333,101.562],[28.375,101.62],[28.355,101.632],[28.352,101.668],[28.381,101.715],[28.493,101.757],[28.534,101.754],[28.594,101.832],[28.613,101.874],[28.613,101.919],[28.671,101.947],[28.714,102.018],[28.723,102.023],[28.75,101.998],[28.804,101.989],[28.824,101.963],[28.858,101.985],[28.888,101.988],[28.908,102.006],[28.92,102.051],[28.954,102.058],[29.037,102.165],[29.045,102.156],[29.073,102.168],[29.103,102.152],[29.13,102.161],[29.176,102.13],[29.185,102.11],[29.173,102.089],[29.178,102.056],[29.222,102.12],[29.239,102.123],[29.272,102.096],[29.298,102.046],[29.299,101.984],[29.315,101.96],[29.344,101.95],[29.422,101.984],[29.438,101.952],[29.501,101.936],[29.49,101.974],[29.496,102.091],[29.51,102.133],[29.504,102.146],[29.532,102.145],[29.533,102.166],[29.513,102.179],[29.467,102.176],[29.457,102.203],[29.533,102.314],[29.575,102.31],[29.604,102.277],[29.684,102.296],[29.72,102.336],[29.737,102.329],[29.763,102.353],[29.789,102.344],[29.8,102.326],[29.825,102.323],[29.838,102.291],[29.882,102.271],[29.955,102.303],[30.017,102.275],[30.077,102.268],[30.101,102.295],[30.129,102.294],[30.188,102.329],[30.234,102.402],[30.355,102.433],[30.524,102.418],[30.597,102.431],[30.64,102.472],[30.686,102.487],[30.714,102.494],[30.745,102.486],[30.769,102.469],[30.693,102.477],[30.682,102.447],[30.712,102.392],[30.706,102.348],[30.678,102.317],[30.676,102.296],[30.654,102.274],[30.636,102.273],[30.621,102.247],[30.637,102.228],[30.628,102.185],[30.595,102.177],[30.638,102.115],[30.658,102.105],[30.669,102.066],[30.662,102.048],[30.699,102.055],[30.707,102.039],[30.741,102.07],[30.763,102.04],[30.792,102.066],[30.871,102.065],[30.898,102.113],[30.896,102.171],[30.91,102.201],[30.934,102.189],[30.95,102.194],[30.996,102.164],[31.09,102.163],[31.107,102.173],[31.141,102.154],[31.084,102.078],[31.073,102.034],[31.145,102.014],[31.156,101.985],[31.177,101.974],[31.169,101.93],[31.146,101.911],[31.161,101.885],[31.19,101.879],[31.201,101.864],[31.266,101.858],[31.282,101.837],[31.282,101.764],[31.31,101.765],[31.289,101.715],[31.353,101.685],[31.385,101.628],[31.382,101.61],[31.341,101.573],[31.379,101.546],[31.368,101.482],[31.354,101.476],[31.348,101.447],[31.331,101.469],[31.294,101.453],[31.346,101.427],[31.372,101.43],[31.39,101.456],[31.41,101.464],[31.435,101.45],[31.437,101.416],[31.397,101.406],[31.399,101.39],[31.371,101.355],[31.369,101.337],[31.385,101.328],[31.359,101.301],[31.376,101.285],[31.379,101.257],[31.399,101.245],[31.464,101.264],[31.518,101.242],[31.535,101.222],[31.506,101.203],[31.495,101.144],[31.469,101.107],[31.487,101.099],[31.494,101.079],[31.549,101.06],[31.576,101.075],[31.606,101.05],[31.628,101.063],[31.641,101.025],[31.682,100.969],[31.718,100.964],[31.751,100.933],[31.738,100.869],[31.759,100.853],[31.786,100.862],[31.805,100.917],[31.825,100.939],[31.861,100.953],[31.865,100.993],[31.931,100.992],[31.949,101.012],[31.979,100.99],[31.987,100.95],[31.958,100.869],[31.99,100.829],[31.992,100.804],[32.01,100.785],[32.05,100.8],[32.049,100.785],[32.087,100.763],[32.1,100.731],[32.133,100.699],[32.156,100.692],[32.163,100.727],[32.183,100.72],[32.188,100.682],[32.219,100.666],[32.233,100.639],[32.232,100.599],[32.261,100.58],[32.269,100.589],[32.282,100.552],[32.304,100.554],[32.346,100.527],[32.394,100.537],[32.443,100.613],[32.479,100.634],[32.504,100.622],[32.524,100.668],[32.57,100.545],[32.611,100.525],[32.61,100.509],[32.63,100.517],[32.695,100.47],[32.694,100.45],[32.732,100.42],[32.696,100.39],[32.698,100.379],[32.756,100.401],[32.718,100.334],[32.743,100.264],[32.729,100.262],[32.723,100.24],[32.606,100.21],[32.631,100.188],[32.639,100.11],[32.669,100.088],[32.721,100.139],[32.802,100.117],[32.837,100.123],[32.896,100.066],[32.896,100.03],[32.929,100.038],[32.948,99.957],[32.987,99.947],[33.021,99.909],[33.047,99.903],[33.046,99.877],[32.994,99.878],[32.942,99.851],[32.952,99.775],[32.924,99.764],[32.883,99.792],[32.733,99.739],[32.732,99.718],[32.764,99.706],[32.772,99.651],[32.791,99.64],[32.781,99.607],[32.793,99.586],[32.84,99.557],[32.862,99.453],[32.9,99.376],[32.885,99.354],[32.895,99.343],[32.882,99.327],[32.879,99.269],[32.928,99.246],[32.952,99.249],[32.954,99.233],[32.983,99.235],[32.99,99.215],[33.019,99.209],[33.045,99.179],[33.046,99.125],[33.078,99.093],[33.095,99.026],[33.081,99.015],[33.1,98.97],[33.118,98.957],[33.126,98.903],[33.181,98.83],[33.197,98.831],[33.219,98.805],[33.265,98.808],[33.278,98.759],[33.302,98.774],[33.321,98.764],[33.344,98.783],[33.372,98.779],[33.41,98.734],[33.478,98.742],[33.486,98.723],[33.506,98.725],[33.549,98.648],[33.595,98.653],[33.61,98.623],[33.637,98.618],[33.647,98.657],[33.702,98.595],[33.732,98.582],[33.748,98.538],[33.774,98.517],[33.768,98.498],[33.848,98.463],[33.843,98.435],[33.867,98.407],[33.908,98.427],[33.925,98.412],[33.957,98.415],[33.981,98.441],[34.029,98.428],[34.059,98.392],[34.088,98.402],[34.095,98.339],[34.079,98.21],[34.123,98.098],[34.115,98.05],[34.123,98.028],[34.199,97.945],[34.207,97.811],[34.162,97.773],[34.128,97.667],[34.117,97.663],[34.058,97.703],[34.037,97.702],[34.017,97.687],[34.012,97.659],[33.956,97.66],[33.919,97.634],[33.93,97.602],[33.903,97.522],[33.912,97.504],[33.897,97.483],[33.902,97.468],[33.887,97.461],[33.889,97.395],[33.848,97.398],[33.842,97.372],[33.824,97.369],[33.795,97.406],[33.755,97.423],[33.729,97.418],[33.682,97.435],[33.627,97.406],[33.606,97.416],[33.584,97.449],[33.576,97.525],[33.519,97.512],[33.466,97.553],[33.469,97.582],[33.452,97.605],[33.462,97.626],[33.412,97.741],[33.397,97.75],[33.386,97.72],[33.36,97.702],[33.358,97.676],[33.341,97.676],[33.336,97.622],[33.263,97.607],[33.221,97.575],[33.206,97.533],[33.183,97.518],[33.168,97.488],[33.145,97.486],[33.138,97.498],[33.107,97.488],[33.098,97.517],[33.036,97.542],[33.022,97.498],[32.989,97.524],[32.957,97.376],[32.942,97.362],[32.927,97.37],[32.904,97.35],[32.887,97.355],[32.882,97.379],[32.829,97.393],[32.826,97.38],[32.78,97.386],[32.728,97.425],[32.705,97.424],[32.653,97.485],[32.649,97.513],[32.622,97.544],[32.615,97.606],[32.576,97.63],[32.537,97.699],[32.531,97.758],[32.518,97.769],[32.52,97.797],[32.502,97.805],[32.482,97.94],[32.471,97.947],[32.453,98.024],[32.429,98.037],[32.398,98.087],[32.392,98.112],[32.401,98.124],[32.379,98.139],[32.342,98.219],[32.319,98.209],[32.263,98.231],[32.234,98.219],[32.211,98.258],[32.124,98.302],[32.008,98.435],[31.96,98.434],[31.942,98.422],[31.923,98.433],[31.91,98.403],[31.896,98.399],[31.857,98.426],[31.83,98.416],[31.829,98.441],[31.782,98.46],[31.768,98.493],[31.716,98.519],[31.713,98.548],[31.657,98.554],[31.59,98.621],[31.579,98.651],[31.493,98.74],[31.437,98.838],[31.375,98.887],[31.307,98.811],[31.279,98.806],[31.251,98.78],[31.263,98.748],[31.333,98.693],[31.332,98.633],[31.257,98.603],[31.228,98.608],[31.221,98.623],[31.184,98.605],[31.179,98.639],[31.154,98.675],[31.119,98.71],[31.083,98.712],[31.067,98.734],[31.049,98.737],[31.031,98.775],[30.996,98.806],[30.908,98.774],[30.891,98.782],[30.85,98.849],[30.785,98.902],[30.77,98.952],[30.732,98.964],[30.698,98.908],[30.683,98.906],[30.64,98.924],[30.609,98.922],[30.591,98.943],[30.569,98.927],[30.55,98.938],[30.528,98.932],[30.45,98.965],[30.398,98.974],[30.335,98.967],[30.321,98.982],[30.275,98.985],[30.26,98.97],[30.231,98.974],[30.216,98.992],[30.183,98.982],[30.152,98.989],[30.135,99.015],[30.121,99.01],[30.08,99.045],[30.023,99.034],[29.943,99.051],[29.931,99.068],[29.818,99.014],[29.792,99.019],[29.663,98.992],[29.607,99.015],[29.564,99.052],[29.52,99.045],[29.479,99.061],[29.297,99.069],[29.291,99.085],[29.242,99.115],[29.199,99.119],[29.163,99.105],[28.949,99.132],[28.814,99.104],[28.735,99.134],[28.7,99.127],[28.641,99.147],[28.614,99.173],[28.595,99.167],[28.589,99.184],[28.565,99.17],[28.493,99.192],[28.44,99.187],[28.424,99.166],[28.401,99.176],[28.364,99.201],[28.35,99.23],[28.317,99.238],[28.298,99.281],[28.286,99.289],[28.26,99.282],[28.259,99.3],[28.228,99.307],[28.151,99.402],[28.21,99.387],[28.263,99.406],[28.267,99.418],[28.318,99.393],[28.399,99.437],[28.444,99.405],[28.453,99.426],[28.493,99.396],[28.546,99.403],[28.555,99.427],[28.549,99.463],[28.58,99.466],[28.603,99.497],[28.616,99.497],[28.624,99.541],[28.671,99.543],[28.68,99.532],[28.71,99.554],[28.742,99.616],[28.772,99.606],[28.815,99.626],[28.81,99.678],[28.845,99.72],[28.72,99.733],[28.7,99.756],[28.699,99.794],[28.653,99.842],[28.628,99.835],[28.632,99.873],[28.611,99.876],[28.599,99.919],[28.562,99.962],[28.54,99.964],[28.524,99.987],[28.477,99.99],[28.448,100.061],[28.424,100.075],[28.377,100.054],[28.352,100.135],[28.321,100.173],[28.296,100.169],[28.289,100.148],[28.253,100.188],[28.234,100.163],[28.221,100.168],[28.202,100.103],[28.182,100.092],[28.194,100.062],[28.185,100.033],[28.147,100.021],[28.083,100.062]]]},{"n":"凉山彝族自治州","c":[27.89,102.081],"r":[[[28.597,103.614],[28.615,103.586],[28.612,103.531],[28.56,103.504],[28.532,103.43],[28.512,103.422],[28.5,103.439],[28.477,103.442],[28.453,103.433],[28.421,103.388],[28.443,103.34],[28.522,103.3],[28.55,103.247],[28.593,103.243],[28.613,103.273],[28.702,103.311],[28.722,103.334],[28.743,103.335],[28.806,103.271],[28.814,103.239],[28.804,103.225],[28.828,103.19],[28.829,103.154],[28.812,103.113],[28.772,103.107],[28.737,103.071],[28.689,103.066],[28.67,103.051],[28.681,102.963],[28.802,102.925],[28.861,102.942],[28.896,102.928],[28.92,102.946],[29.022,102.909],[29.065,102.97],[29.127,102.929],[29.19,102.945],[29.222,102.975],[29.251,102.963],[29.251,103.02],[29.28,103.032],[29.303,102.94],[29.265,102.912],[29.222,102.905],[29.206,102.88],[29.208,102.837],[29.242,102.833],[29.25,102.805],[29.237,102.781],[29.187,102.767],[29.173,102.779],[29.16,102.772],[29.162,102.673],[29.178,102.649],[29.211,102.636],[29.192,102.591],[29.16,102.595],[29.16,102.563],[29.117,102.548],[29.112,102.522],[29.094,102.515],[29.036,102.525],[28.984,102.472],[28.92,102.481],[28.845,102.43],[28.855,102.352],[28.9,102.291],[28.899,102.254],[29.013,102.181],[29.025,102.189],[29.031,102.15],[28.954,102.058],[28.92,102.051],[28.908,102.006],[28.888,101.988],[28.858,101.985],[28.824,101.963],[28.804,101.989],[28.75,101.998],[28.723,102.023],[28.714,102.018],[28.671,101.947],[28.613,101.919],[28.613,101.874],[28.594,101.832],[28.534,101.754],[28.493,101.757],[28.381,101.715],[28.352,101.668],[28.355,101.632],[28.375,101.62],[28.333,101.562],[28.315,101.51],[28.319,101.482],[28.404,101.468],[28.411,101.454],[28.472,101.44],[28.49,101.426],[28.462,101.373],[28.472,101.368],[28.521,101.413],[28.505,101.428],[28.475,101.595],[28.492,101.63],[28.509,101.618],[28.538,101.62],[28.599,101.551],[28.589,101.517],[28.627,101.49],[28.625,101.446],[28.646,101.427],[28.629,101.368],[28.666,101.356],[28.673,101.298],[28.653,101.203],[28.755,101.205],[28.789,101.173],[28.836,101.172],[28.891,101.193],[28.905,101.181],[28.941,101.184],[28.947,101.16],[29,101.145],[29.018,101.156],[29.071,101.116],[29.112,101.118],[29.147,101.097],[29.166,101.057],[29.146,101.05],[29.061,100.929],[29.088,100.936],[29.099,100.922],[29.14,100.916],[29.146,100.883],[29.113,100.837],[29.088,100.772],[29.064,100.773],[29.055,100.832],[29.021,100.846],[28.993,100.82],[28.989,100.798],[29.01,100.779],[28.997,100.705],[29.019,100.65],[29.005,100.658],[28.955,100.609],[28.95,100.521],[28.917,100.543],[28.833,100.564],[28.821,100.587],[28.798,100.58],[28.744,100.595],[28.75,100.563],[28.709,100.509],[28.709,100.472],[28.696,100.472],[28.671,100.524],[28.574,100.53],[28.5,100.491],[28.475,100.45],[28.448,100.44],[28.433,100.416],[28.387,100.421],[28.325,100.39],[28.306,100.416],[28.291,100.414],[28.25,100.373],[28.206,100.368],[28.019,100.427],[28.006,100.418],[28.017,100.349],[28.01,100.303],[27.961,100.256],[27.987,100.226],[27.984,100.202],[28.048,100.1],[28.085,100.072],[28.083,100.062],[28.03,100.087],[28.019,100.121],[27.937,100.196],[27.908,100.17],[27.877,100.21],[27.859,100.309],[27.83,100.309],[27.806,100.286],[27.792,100.303],[27.736,100.3],[27.72,100.328],[27.756,100.351],[27.755,100.375],[27.841,100.415],[27.866,100.443],[27.845,100.496],[27.852,100.504],[27.828,100.511],[27.825,100.537],[27.809,100.546],[27.856,100.607],[27.915,100.635],[27.911,100.655],[27.924,100.68],[27.887,100.704],[27.869,100.7],[27.858,100.719],[27.801,100.707],[27.743,100.775],[27.684,100.789],[27.671,100.848],[27.65,100.832],[27.641,100.85],[27.616,100.828],[27.624,100.855],[27.597,100.854],[27.592,100.868],[27.522,100.912],[27.453,100.901],[27.471,100.921],[27.469,100.937],[27.349,101.002],[27.344,101.02],[27.312,101.01],[27.295,101.03],[27.267,101.028],[27.199,101.06],[27.209,101.119],[27.196,101.17],[27.165,101.168],[27.183,101.197],[27.179,101.246],[27.198,101.283],[27.198,101.316],[27.18,101.335],[27.185,101.355],[27.145,101.394],[27.191,101.427],[27.216,101.419],[27.239,101.471],[27.23,101.515],[27.278,101.53],[27.295,101.558],[27.335,101.584],[27.34,101.635],[27.289,101.665],[27.245,101.643],[27.208,101.651],[27.15,101.682],[27.129,101.709],[27.133,101.762],[27.102,101.817],[27.123,101.833],[27.13,101.87],[27.168,101.879],[27.183,101.863],[27.19,101.878],[27.267,101.897],[27.244,101.912],[27.193,101.908],[27.144,101.941],[27.137,101.927],[27.104,101.939],[27.123,101.973],[27.115,101.994],[27.097,102],[27.093,102.026],[27.076,102.034],[27.083,102.05],[27.146,102.086],[27.182,102.161],[27.138,102.176],[27.107,102.241],[27.064,102.239],[27.046,102.218],[27,102.23],[26.957,102.214],[26.945,102.229],[26.924,102.226],[26.91,102.205],[26.889,102.214],[26.841,102.202],[26.814,102.216],[26.82,102.193],[26.802,102.174],[26.792,102.19],[26.775,102.175],[26.764,102.193],[26.745,102.196],[26.681,102.157],[26.675,102.136],[26.638,102.132],[26.634,102.115],[26.657,102.068],[26.671,102.074],[26.693,102.055],[26.719,102.063],[26.738,102.046],[26.712,102.033],[26.716,102.007],[26.639,101.984],[26.634,102.001],[26.599,102.011],[26.597,102.031],[26.494,102.051],[26.423,102.02],[26.431,101.995],[26.455,101.982],[26.449,101.943],[26.419,101.929],[26.411,101.939],[26.362,101.928],[26.323,101.935],[26.244,101.902],[26.191,101.907],[26.16,101.841],[26.117,101.832],[26.046,101.835],[26.049,101.858],[26.099,101.9],[26.108,101.923],[26.084,101.955],[26.096,102.021],[26.065,102.084],[26.068,102.108],[26.147,102.175],[26.189,102.242],[26.22,102.257],[26.246,102.351],[26.298,102.396],[26.301,102.44],[26.34,102.543],[26.362,102.552],[26.337,102.629],[26.308,102.639],[26.282,102.611],[26.249,102.601],[26.205,102.675],[26.218,102.72],[26.269,102.74],[26.299,102.785],[26.307,102.833],[26.366,102.88],[26.339,102.893],[26.335,102.927],[26.341,102.976],[26.372,102.998],[26.483,102.99],[26.487,103.032],[26.528,103.057],[26.554,103.054],[26.555,103.037],[26.59,103.019],[26.602,103.03],[26.66,103.028],[26.677,103.006],[26.707,103.01],[26.765,102.984],[26.775,102.992],[26.839,102.964],[26.844,102.947],[26.913,102.896],[27,102.895],[27.028,102.871],[27.135,102.914],[27.293,102.882],[27.406,102.941],[27.411,102.955],[27.367,102.985],[27.41,103.056],[27.397,103.08],[27.401,103.112],[27.426,103.145],[27.451,103.145],[27.562,103.218],[27.565,103.294],[27.597,103.299],[27.618,103.28],[27.709,103.37],[27.709,103.393],[27.797,103.49],[27.84,103.509],[27.91,103.503],[27.964,103.564],[27.978,103.563],[27.965,103.517],[27.984,103.499],[28.032,103.488],[28.021,103.459],[28.041,103.432],[28.072,103.433],[28.088,103.454],[28.124,103.455],[28.122,103.47],[28.169,103.533],[28.231,103.573],[28.239,103.608],[28.26,103.632],[28.227,103.695],[28.199,103.702],[28.202,103.721],[28.236,103.74],[28.234,103.77],[28.285,103.829],[28.301,103.87],[28.322,103.876],[28.357,103.853],[28.384,103.86],[28.495,103.81],[28.525,103.782],[28.523,103.757],[28.512,103.74],[28.472,103.725],[28.498,103.685],[28.553,103.713],[28.563,103.689],[28.595,103.665],[28.605,103.64],[28.597,103.614]],[[26.703,101.917],[26.636,101.921],[26.639,101.939],[26.708,101.947],[26.703,101.917]]]}];
+
+/* ============================================================
+   工具函数
+   ============================================================ */
+const fmtMoney = n => n >= 1e8 ? (n/1e8).toFixed(2) + ' 亿'
+                    : n >= 1e4 ? (n/1e4).toFixed(1) + ' 万'
+                    : n.toLocaleString();
+const fmtMetric = (v, m) =>
+    m === 'margin' ? v.toFixed(2) + '%'
+  : m === 'arpu'   ? '¥' + v.toFixed(2)
+  :                  '¥' + fmtMoney(v);
+const M_LABEL   = { gmv:'GMV', profit:'毛利值', margin:'毛利率', arpu:'单客价值' };
+const MGR_LABEL = {
+  a: { name:'区域 A', region:'阿坝州、广安、南充' },
+  b: { name:'区域 B', region:'雅安、绵阳、眉山' },
+  all: { name:'全区域', region:'西南区域 · 四川 · 双区域' },
+};
+
+/* 单指标着色斜坡（与图例的 gradient 完全对应） */
+const COLOR_STOPS = [
+  [0.00, [179,212,184]],
+  [0.18, [127,191,140]],
+  [0.42, [217,200,98]],
+  [0.62, [217,161,79]],
+  [0.82, [217,122,62]],
+  [1.00, [197,70,46]],
+];
+
+/* v4 · 参考图风格的热力渐变 (蓝紫 → 青绿 → 黄 → 橙 → 红)
+   仅用于底层热力斑,与图例本身仍沿用米白纸面主色不冲突 */
+const HEAT_STOPS = [
+  [0.00, [ 82, 96,180]],  // 蓝紫
+  [0.20, [ 95,161,215]],  // 蓝
+  [0.40, [122,199,145]],  // 绿
+  [0.60, [230,220, 90]],  // 黄
+  [0.80, [235,140, 55]],  // 橙
+  [1.00, [220, 55, 55]],  // 红
+];
+
+function tintFrom(stops, t) {
+  t = Math.max(0, Math.min(1, t));
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [t0, c0] = stops[i], [t1, c1] = stops[i+1];
+    if (t <= t1) {
+      const k = (t - t0) / (t1 - t0);
+      const r = Math.round(c0[0] + (c1[0]-c0[0])*k);
+      const g = Math.round(c0[1] + (c1[1]-c0[1])*k);
+      const b = Math.round(c0[2] + (c1[2]-c0[2])*k);
+      return `rgb(${r},${g},${b})`;
+    }
+  }
+  return `rgb(${stops.at(-1)[1].join(',')})`;
+}
+function tintFromT(t) { return tintFrom(COLOR_STOPS, t); }
+function tintHeat(t)  { return tintFrom(HEAT_STOPS, t); }
+
+/* v4 · 极端值剔除机制:头部单点的量级远高于次高值,
+   若参与颜色分档会把所有其他景点压成一片浅色。作用:仅用于图例/颜色分母,
+   景点本身仍绘制。可通过关闭"剔除极值"开关取消。 */
+const OUTLIER_NAMES = new Set(['九寨沟风景区']);
+
+/* v4 · 需要以朱砂高亮的四大景区 */
+const HIGHLIGHT_NAMES = new Set(['九寨沟风景区', '黄龙风景名胜区', '四姑娘山景区', '达古冰川风景名胜区']);
+
+/* ============================================================
+   状态
+   ============================================================ */
+const state = { metric:'gmv', level:'全部', heat:true, mark:true, mgr:'a', mgrRing:false, excludeOutlier:true, boundary:true };
+
+/* ============================================================
+   地图初始化
+   ============================================================ */
+const map = L.map('map', {
+  center: [32.0, 103.8], zoom: 7, zoomControl: true,
+  attributionControl: false, zoomSnap: 0.25
+});
+
+L.tileLayer(
+  'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+  { subdomains: '1234', maxZoom: 18 }
+).addTo(map);
+
+
+/* ============================================================
+   v5 · 市州边界层
+   数据：DataV.GeoAtlas 四川省市州边界(已按 0.008° 抽稀)，
+        坐标与热力图同为 GCJ-02，与高德底图对齐。
+   作用：解决纯热力图难以辨认"点位落在哪个市"的问题——
+        浅蓝底线勾出行政范围，当前区域覆盖的市州加深描边与填充。
+   ============================================================ */
+const BOUND_STYLE = {
+  mine:  { color: '#2f6ea8', weight: 2.6, opacity: 0.95, fill: true,  fillColor: '#8fb8dc', fillOpacity: 0.16 },
+  other: { color: '#8fb8dc', weight: 1.6, opacity: 0.9,  fill: false, fillOpacity: 0 },
+};
+
+map.createPane('boundaryPane');
+map.getPane('boundaryPane').style.zIndex = 400;
+map.createPane('cityLabelPane');
+map.getPane('cityLabelPane').style.zIndex = 420;
+map.getPane('cityLabelPane').style.pointerEvents = 'none';
+
+const boundaryLayer = L.layerGroup([], { pane: 'boundaryPane' });
+const cityLabelLayer = L.layerGroup([], { pane: 'cityLabelPane' });
+const boundaryShapes = [];
+
+/* 市州名 → 明细 region 字段里的写法(如 "阿坝州"/"广安") */
+const cityKey = (name) => name
+  .replace(/藏族羌族自治州|彝族自治州|藏族自治州/, '')
+  .replace(/市$/, '');
+
+/** 当前所选区域在哪些市州有景点 —— 由 RAW 数据推导，不额外维护名单 */
+function myCityNames() {
+  const regions = filteredByMgr().map(d => d.region);
+  return new Set(
+    CITY_BOUNDARIES
+      .filter(c => regions.some(r => r.includes(cityKey(c.n))))
+      .map(c => c.n)
+  );
+}
+
+function buildBoundaries() {
+  CITY_BOUNDARIES.forEach(c => {
+    const poly = L.polygon(c.r, {
+      ...BOUND_STYLE.other,
+      pane: 'boundaryPane',
+      className: 'city-outline',
+      interactive: false,
+    });
+    boundaryShapes.push({ name: c.n, poly });
+    boundaryLayer.addLayer(poly);
+
+    const label = L.marker(c.c, {
+      pane: 'cityLabelPane',
+      interactive: false,
+      icon: L.divIcon({ className: '', html: '<div class="city-label">' + cityKey(c.n) + '</div>', iconSize: [0, 0] }),
+    });
+    cityLabelLayer.addLayer(label);
+  });
+}
+
+/** 区域切换后重新分色：覆盖市州加深，其余保持浅蓝底线 */
+function restyleBoundaries() {
+  const mine = myCityNames();
+  boundaryShapes.forEach(({ name, poly }) => {
+    poly.setStyle(mine.has(name) ? BOUND_STYLE.mine : BOUND_STYLE.other);
+  });
+  cityLabelLayer.eachLayer(mk => {
+    const el = mk.getElement()?.querySelector('.city-label');
+    if (el) el.classList.toggle('is-mine', mine.has(mk._cityName));
+  });
+}
+
+function renderBoundaries() {
+  if (state.boundary) {
+    boundaryLayer.addTo(map);
+    cityLabelLayer.addTo(map);
+    restyleBoundaries();
+  } else {
+    map.removeLayer(boundaryLayer);
+    map.removeLayer(cityLabelLayer);
+  }
+}
+
+buildBoundaries();
+/* 标注与市州名绑定，供 restyle 时定位 */
+cityLabelLayer.getLayers().forEach((mk, i) => { mk._cityName = CITY_BOUNDARIES[i].n; });
+
+/* ============================================================
+   热力图 —— v4 · 两阶段 Canvas 渲染(区域总量热力)
+   核心:先在离屏 canvas 用"值加权 alpha"叠加每个景点的高斯光斑,
+        再将累计 alpha 值查表 → 蓝紫→红 的热力渐变。
+        - 每点强度 = value / refMax,决定光斑 alpha 与半径
+        - 相邻点的光斑在离屏 canvas 上以 alpha 相加(自然形成"区域总量")
+        - 高聚集区(如四姑娘山周边、九寨沟周边) alpha 累计更高 → 更红
+        - 归一化分母 refMax 已剔除极值(头部单点),避免"一个盖全场"
+        - Gradient 使用 HEAT_STOPS(蓝紫→绿→黄→橙→红),贴近参考图风格
+   ============================================================ */
+const HeatCanvas = L.Layer.extend({
+  initialize(data, opts) {
+    this._data = data;
+    this._max = opts.max;
+    this._metric = opts.metric;
+  },
+  setData(data, opts) {
+    this._data = data;
+    this._max = opts.max;
+    this._metric = opts.metric;
+    if (this._canvas) this._redraw();
+  },
+  onAdd(map) {
+    this._map = map;
+    if (!this._canvas) {
+      this._canvas = L.DomUtil.create('canvas', 'leaflet-heat-canvas');
+      this._canvas.style.position = 'absolute';
+      this._canvas.style.pointerEvents = 'none';
+      this._canvas.style.zIndex = 350;
+      this._canvas.style.transition = 'opacity 0.15s ease';
+      this._canvas.style.willChange = 'opacity';
+    }
+    map.getPanes().overlayPane.appendChild(this._canvas);
+    // v4-fix · 缩放/平移过程中 canvas 与地图 tile 不同步,会形成"重影/错位"。
+    //           改为:交互开始 → 隐藏 canvas;交互结束 → 重绘并淡入。
+    this._onZoomStart = () => { this._canvas.style.opacity = '0'; };
+    this._onZoomEnd   = () => { this._redraw(); this._canvas.style.opacity = '1'; };
+    this._onMoveStart = () => { this._canvas.style.opacity = '0'; };
+    this._onMoveEnd   = () => { this._redraw(); this._canvas.style.opacity = '1'; };
+    this._onResize    = () => { this._redraw(); };
+    map.on('zoomstart', this._onZoomStart, this);
+    map.on('zoomend',   this._onZoomEnd,   this);
+    map.on('movestart', this._onMoveStart, this);
+    map.on('moveend',   this._onMoveEnd,   this);
+    map.on('resize viewreset', this._onResize, this);
+    this._redraw();
+  },
+  onRemove(map) {
+    if (this._canvas && this._canvas.parentNode) {
+      this._canvas.parentNode.removeChild(this._canvas);
+    }
+    map.off('zoomstart', this._onZoomStart, this);
+    map.off('zoomend',   this._onZoomEnd,   this);
+    map.off('movestart', this._onMoveStart, this);
+    map.off('moveend',   this._onMoveEnd,   this);
+    map.off('resize viewreset', this._onResize, this);
+  },
+  _redraw() {
+    if (!this._map || !this._canvas) return;
+    const map = this._map;
+    const size = map.getSize();
+    const cvs = this._canvas;
+    cvs.width = size.x; cvs.height = size.y;
+    const tl = map.containerPointToLayerPoint([0, 0]);
+    L.DomUtil.setPosition(cvs, tl);
+
+    const ctx = cvs.getContext('2d');
+    ctx.clearRect(0, 0, size.x, size.y);
+
+    // 缩放自适应半径
+    const z = map.getZoom();
+    const baseR = Math.max(46, 30 + (z - 6) * 18);
+
+    const max = this._max || 1;
+
+    /* --- 阶段 A · 离屏画布上叠加每个点的"值加权"高斯 alpha --- */
+    const off = document.createElement('canvas');
+    off.width = size.x; off.height = size.y;
+    const octx = off.getContext('2d');
+    octx.globalCompositeOperation = 'lighter';   // alpha 累加,形成"区域总量"
+
+    this._data.forEach(d => {
+      const v = d[this._metric];
+      if (v <= 0) return;
+      // v4-fix · 极值(如九寨沟)之前被 refMax 剔除后 t 值被 clamp 到 1,
+      //         导致九寨沟位置在热力上反而不如"多点密集但值中等"的区域红。
+      //         这里对极值单独放大 peak alpha,让极值本身就是饱和红,
+      //         邻近正常点仍能继续累加,视觉与业务量一致。
+      const isOutlier = state.excludeOutlier && OUTLIER_NAMES.has(d.name);
+      const t = isOutlier ? 1.0 : Math.max(0, Math.min(1, v / max));
+      // 半径:极值给大一档
+      const r = baseR * (isOutlier ? 1.20 : (0.5 + 0.6 * Math.pow(t, 0.4)));
+      // 单点最大 alpha:极值 0.95(近饱和红),普通点 0.55 封顶
+      const peak = isOutlier ? 0.95 : (0.15 + 0.4 * Math.pow(t, 0.55));
+      const p = map.latLngToContainerPoint([d.lat, d.lng]);
+      const g = octx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      g.addColorStop(0.0, `rgba(0,0,0,${peak})`);
+      g.addColorStop(0.5, `rgba(0,0,0,${peak * 0.42})`);
+      g.addColorStop(1.0, 'rgba(0,0,0,0)');
+      octx.fillStyle = g;
+      octx.beginPath();
+      octx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      octx.fill();
+    });
+
+    /* --- 阶段 B · 读离屏 alpha → 查 HEAT_STOPS 渐变色写主画布 --- */
+    // 预生成 256 色查找表(蓝紫 → 红)
+    const lut = HeatCanvas._lut || (HeatCanvas._lut = HeatCanvas._buildLUT());
+    const src = octx.getImageData(0, 0, size.x, size.y);
+    const dst = ctx.createImageData(size.x, size.y);
+    const sd = src.data, dd = dst.data;
+    for (let i = 0; i < sd.length; i += 4) {
+      const a = sd[i + 3];   // 累计 alpha (0..255)
+      if (a === 0) continue;
+      // 曲线放大低-中值(视觉更铺开、更贴近参考图)
+      const idx = Math.min(255, Math.round(Math.pow(a / 255, 0.85) * 255));
+      const c = lut[idx];
+      dd[i]   = c[0];
+      dd[i+1] = c[1];
+      dd[i+2] = c[2];
+      dd[i+3] = Math.min(230, a + 30);   // 让边缘也可见
+    }
+    ctx.putImageData(dst, 0, 0);
+  },
+});
+
+HeatCanvas._buildLUT = function() {
+  const lut = new Array(256);
+  for (let i = 0; i < 256; i++) {
+    const c = tintHeat(i / 255).match(/\d+/g).map(Number);
+    lut[i] = [c[0], c[1], c[2]];
+  }
+  return lut;
+};
+
+let heatLayer = null;
+const markerLayer = L.layerGroup().addTo(map);
+
+function renderHeat(data) {
+  if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
+  if (!state.heat || data.length === 0) return;
+  const max = refMaxFor(data, state.metric);   // v4:剔除极值后归整
+  heatLayer = new HeatCanvas(data, { max, metric: state.metric });
+  heatLayer.addTo(map);
+}
+
+/* ============================================================
+   标记 —— v4:统一墨色,仅四大景区(九寨沟、黄龙、四姑娘山、达古冰川)朱砂高亮
+   ============================================================ */
+function renderMarkers(data) {
+  markerLayer.clearLayers();
+  if (!state.mark) return;
+
+  data.forEach(d => {
+    const highlighted = HIGHLIGHT_NAMES.has(d.name);
+    const mgrClass = state.mgrRing ? ` m-${d.mgr}` : '';
+    const hlClass = highlighted ? ' hl' : '';
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="attr-marker${mgrClass}${hlClass}"></div>`,
+      iconSize: [14,14], iconAnchor: [7,7], popupAnchor: [0,-9]
+    });
+    const m = L.marker([d.lat, d.lng], { icon, riseOnHover: true, zIndexOffset: highlighted ? 1000 : 0 });
+    m.bindPopup(popupHTML(d), { maxWidth: 380, closeButton: true, autoPan: true });
+    m._d = d;
+    markerLayer.addLayer(m);
+  });
+}
+
+function popupHTML(d) {
+  const mgrName = d.mgr === 'a' ? '区域 A' : '区域 B';
+  return `
+    <div class="popup">
+      <div class="tag-row">
+        <span class="tag">${d.level}</span>
+        <span class="mgr-chip m-${d.mgr}">${mgrName}</span>
+      </div>
+      <div class="ttl">${d.name}</div>
+      <div class="region">${d.region}</div>
+      <div class="grid">
+        <div class="cell">
+          <div class="lbl">GMV(总营业额)</div>
+          <div class="val accent">¥${fmtMoney(d.gmv)}</div>
+        </div>
+        <div class="cell">
+          <div class="lbl">毛利值</div>
+          <div class="val">¥${fmtMoney(d.profit)}</div>
+        </div>
+        <div class="cell">
+          <div class="lbl">毛利率</div>
+          <div class="val">${d.margin.toFixed(2)}%</div>
+        </div>
+        <div class="cell">
+          <div class="lbl">单客价值</div>
+          <div class="val">¥${d.arpu.toFixed(2)}</div>
+        </div>
+        <div class="cell">
+          <div class="lbl">成交票量</div>
+          <div class="val full">${d.tickets.toLocaleString()} 张</div>
+        </div>
+        <div class="cell">
+          <div class="lbl">地理坐标</div>
+          <div class="val full">${d.lat.toFixed(3)}°N · ${d.lng.toFixed(3)}°E</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ============================================================
+   KPI
+   ============================================================ */
+function updateKPIs(data) {
+  const tot   = data.reduce((s,d) => s + d.gmv, 0);
+  const prof  = data.reduce((s,d) => s + d.profit, 0);
+  const mar   = tot ? (prof/tot*100) : 0;
+  document.getElementById('kpi-count').innerHTML  = data.length + '<span class="unit">个</span>';
+  document.getElementById('kpi-gmv').innerHTML    = '¥' + fmtMoney(tot);
+  document.getElementById('kpi-profit').innerHTML = '¥' + fmtMoney(prof);
+  document.getElementById('kpi-margin').innerHTML = mar.toFixed(2) + '<span class="unit">%</span>';
+}
+
+/* ============================================================
+   图例
+   ============================================================ */
+/* 图例的最大值向上"归整":
+   金额 → 亿/万/千 的整数级别；毛利率 → 5% 步进的整数百分比；
+   单客价值 → 50 / 10 的整数步进。 */
+/* v4 · 统一"归一化参考最大值":
+   - excludeOutlier=true 时,把 OUTLIER_NAMES 名单里的景点剔除后再取 max
+   - 再向上归整成整亿/整万/5%,与图例读数保持一致
+   若剔除后为空(极端情况),回退到原始最大值 */
+function refMaxFor(data, metric) {
+  const clean = state.excludeOutlier
+    ? data.filter(d => !OUTLIER_NAMES.has(d.name))
+    : data;
+  const pool = clean.length ? clean : data;
+  const rawMax = Math.max(...pool.map(d => d[metric]));
+  return roundUpNice(rawMax, metric);
+}
+
+function roundUpNice(val, metric) {
+  if (val <= 0) return metric === 'margin' ? 1 : 100;
+  if (metric === 'margin') {
+    // 5% 步进(0.05 之内的最大值,保证 4.57 -> 5, 23.36 -> 25)
+    return Math.ceil(val / 5) * 5;
+  }
+  if (metric === 'arpu') {
+    if (val >= 100) return Math.ceil(val / 50) * 50;
+    if (val >= 20)  return Math.ceil(val / 10) * 10;
+    return Math.ceil(val / 5) * 5;
+  }
+  // gmv / profit: 亿 / 千万 / 百万 / 万 / 千 的整数
+  if (val >= 1e8)  return Math.ceil(val / 1e8)  * 1e8;
+  if (val >= 1e7)  return Math.ceil(val / 1e7)  * 1e7;
+  if (val >= 1e6)  return Math.ceil(val / 1e6)  * 1e6;
+  if (val >= 1e5)  return Math.ceil(val / 1e5)  * 1e5;
+  if (val >= 1e4)  return Math.ceil(val / 1e4)  * 1e4;
+  return Math.ceil(val / 1e3) * 1e3;
+}
+
+function updateLegend(data) {
+  document.getElementById('legend-title').innerHTML =
+    `${M_LABEL[state.metric]} <em>·</em> 热力分布`;
+  if (!data.length) {
+    ['legend-min','legend-mid','legend-max'].forEach(id =>
+      document.getElementById(id).textContent = '—');
+    return;
+  }
+  const min = 0;
+  // v4-fix:图例上限使用原始 max(含极值),避免"6000万"歧义。
+  //         内部颜色分档才用剔除极值后的 refMax。
+  const rawMax = Math.max(...data.map(d => d[state.metric]));
+  const max = roundUpNice(rawMax, state.metric);
+  const mid = (min + max) / 2;
+  document.getElementById('legend-min').textContent = fmtMetric(min, state.metric);
+  document.getElementById('legend-mid').textContent = fmtMetric(mid, state.metric);
+  document.getElementById('legend-max').textContent = fmtMetric(max, state.metric);
+}
+
+/* ============================================================
+   排行榜 —— 修复 Bug 2:重影
+   问题:setTimeout(openPopup, 900) 与 flyTo 时机不同步,且旧 popup
+        未关闭导致同时残留两个 popup + hover 视觉停留。
+   修法:1) 点击瞬间 map.closePopup(),清理所有已开弹窗
+        2) 用 map.once('moveend', ...) 精确等 flyTo 完成再 openPopup
+        3) 每次 render 前 map.closePopup(),避免 rerender 时 DOM 残留
+   ============================================================ */
+function updateRank(data) {
+  const sorted = [...data].sort((a,b) => b[state.metric] - a[state.metric]).slice(0, 10);
+  const html = sorted.map((d, i) => `
+    <div class="rank-row ${i===0?'top1':i===1?'top2':i===2?'top3':''}" data-name="${d.name}">
+      <div class="num">${String(i+1).padStart(2,'0')}</div>
+      <div class="info">
+        <div class="name" title="${d.name}"><span class="mgr-dot m-${d.mgr}"></span>${d.name}</div>
+        <div class="lvl">${d.level} · ${d.region.replace('四川省','')}</div>
+      </div>
+      <div class="val">${fmtMetric(d[state.metric], state.metric)}</div>
+    </div>
+  `).join('');
+  const t = document.getElementById('rank-table');
+  t.innerHTML = html || '<div class="empty">暂无数据</div>';
+  t.querySelectorAll('.rank-row').forEach(r => {
+    r.onclick = () => flyToAttr(r.dataset.name);
+  });
+  document.getElementById('rank-meta').textContent =
+    `前 ${Math.min(10, sorted.length)} 名 · ${M_LABEL[state.metric]}`;
+}
+
+function flyToAttr(nm) {
+  map.closePopup();
+  let target = null;
+  markerLayer.eachLayer(mk => { if (mk._d && mk._d.name === nm) target = mk; });
+  if (!target) return;
+  map.once('moveend', () => {
+    map.closePopup();
+    target.openPopup();
+  });
+  map.flyTo([target._d.lat, target._d.lng], Math.max(map.getZoom(), 9), {
+    duration: 0.9, easeLinearity: 0.25
+  });
+}
+
+/* ============================================================
+   区域切换
+   ============================================================ */
+function applyMgr() {
+  const info = MGR_LABEL[state.mgr];
+  document.getElementById('brand-sub').textContent =
+    state.mgr === 'all'
+      ? `西南区域 · 四川 · 双区域 · ${filteredByMgr().length} 处景点`
+      : `${info.region} · ${filteredByMgr().length} 处景点`;
+  const geoMgr = document.getElementById('geo-mgr');
+  geoMgr.textContent = info.name;
+  geoMgr.setAttribute('data-m', state.mgr === 'all' ? '' : state.mgr);
+
+  const pts = filteredByMgr().map(d => [d.lat, d.lng]);
+  if (pts.length) {
+    map.fitBounds(pts, { padding: [80, 80], maxZoom: 8, animate: true, duration: 0.9 });
+  }
+
+  const lats = pts.map(p => p[0]), lngs = pts.map(p => p[1]);
+  const minLat = Math.min(...lats).toFixed(1), maxLat = Math.max(...lats).toFixed(1);
+  const minLng = Math.min(...lngs).toFixed(1), maxLng = Math.max(...lngs).toFixed(1);
+  document.getElementById('geo-coord').textContent =
+    `N ${minLat}° — ${maxLat}°　E ${minLng}° — ${maxLng}°`;
+}
+
+function filteredByMgr() {
+  return state.mgr === 'all' ? RAW : RAW.filter(d => d.mgr === state.mgr);
+}
+
+/* ============================================================
+   渲染编排
+   ============================================================ */
+function render() {
+  map.closePopup();
+  let data = filteredByMgr();
+  if (state.level !== '全部') data = data.filter(d => d.level === state.level);
+  renderHeat(data);
+  renderMarkers(data);
+  updateKPIs(data);
+  updateLegend(data);
+  updateRank(data);
+}
+
+/* ============================================================
+   初始化筛选与事件
+   ============================================================ */
+function initLevelPills() {
+  const levels = ['全部', '头部景区', '重点景区', '长尾景区']
+    .filter(l => l === '全部' || RAW.some(d => d.level === l));
+  const c = document.getElementById('level-pills');
+  c.innerHTML = levels.map(l =>
+    `<div class="pill ${l==='全部'?'active':''}" data-level="${l}">${l}</div>`
+  ).join('');
+  c.querySelectorAll('.pill').forEach(p => p.onclick = () => {
+    c.querySelectorAll('.pill').forEach(x => x.classList.remove('active'));
+    p.classList.add('active');
+    state.level = p.dataset.level;
+    render();
+  });
+}
+
+document.querySelectorAll('#metric-segs .seg').forEach(s => s.onclick = () => {
+  document.querySelectorAll('#metric-segs .seg').forEach(x => x.classList.remove('active'));
+  s.classList.add('active');
+  state.metric = s.dataset.metric;
+  render();
+});
+
+document.getElementById('t-heat').onchange = e => { state.heat = e.target.checked; render(); };
+document.getElementById('t-mark').onchange = e => { state.mark = e.target.checked; render(); };
+document.getElementById('t-mgr').onchange  = e => { state.mgrRing = e.target.checked; render(); };
+document.getElementById('t-outlier').onchange = e => { state.excludeOutlier = e.target.checked; render(); };
+document.getElementById('t-bound').onchange = e => { state.boundary = e.target.checked; renderBoundaries(); };
+
+document.querySelectorAll('#mgr-tabs .mgr-tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('#mgr-tabs .mgr-tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  state.mgr = t.dataset.mgr;
+  applyMgr();
+  restyleBoundaries();
+  render();
+});
+
+initLevelPills();
+applyMgr();
+renderBoundaries();
+render();
+</script>
+</body>
+</html>
